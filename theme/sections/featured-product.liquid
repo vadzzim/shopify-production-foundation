@@ -175,18 +175,22 @@
                       | item_count_for_variant: product.selected_or_first_available_variant.id
                     -%}
                     {% # theme-check-enable %}
-                    <span class="visually-hidden" id="quantity-label-{{ section.id }}">
-                      {%- if cart_qty > 0 -%}
-                        {{- 'products.product.quantity.in_cart_aria_label' | t: quantity: cart_qty -}}
-                      {%- else -%}
-                        {{- 'products.product.quantity.label' | t -}}
-                      {%- endif -%}
-                    </span>
+                    {%- comment -%}
+                      Same fix as main-product: an `aria-labelledby` on a label
+                      does not reach the input whose name is computed from that
+                      label. See the comment there for the full reasoning.
+                    {%- endcomment -%}
                     <label
                       class="quantity__label form__label"
                       for="Quantity-{{ section.id }}"
-                      aria-labelledby="quantity-label-{{ section.id }}"
                     >
+                      <span class="visually-hidden" id="quantity-label-{{ section.id }}">
+                        {%- if cart_qty > 0 -%}
+                          {{- 'products.product.quantity.in_cart_aria_label' | t: quantity: cart_qty -}}
+                        {%- else -%}
+                          {{- 'products.product.quantity.label' | t -}}
+                        {%- endif -%}
+                      </span>
                       <span aria-hidden="true">{{ 'products.product.quantity.label' | t }}</span>
                       <span class="quantity__rules-cart{% if cart_qty == 0 %} hidden{% endif %}" aria-hidden="true">
                         {%- render 'loading-spinner' -%}
