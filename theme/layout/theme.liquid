@@ -289,16 +289,33 @@
       {{ 'component-discounts.css' | asset_url | stylesheet_tag }}
     {%- endif -%}
 
-    {%- unless settings.type_body_font.system? -%}
+    {%- liquid
+      # Heading and body can resolve to the same file - Dawn's default has both
+      # on Assistant regular - and Dawn preloaded each setting blindly, so that
+      # setup asked for the same woff2 twice. Shopify caps a response at ten
+      # preload Link headers and sorts image preloads last, so a duplicate does
+      # not merely waste a request: it evicts whatever would have taken the
+      # tenth slot.
+      assign body_font_url = ''
+      unless settings.type_body_font.system?
+        assign body_font_url = settings.type_body_font | font_url
+      endunless
+
+      assign header_font_url = ''
+      unless settings.type_header_font.system?
+        assign header_font_url = settings.type_header_font | font_url
+      endunless
+    -%}
+    {%- if body_font_url != blank -%}
       {% comment %}theme-check-disable AssetPreload{% endcomment %}
-      <link rel="preload" as="font" href="{{ settings.type_body_font | font_url }}" type="font/woff2" crossorigin>
+      <link rel="preload" as="font" href="{{ body_font_url }}" type="font/woff2" crossorigin>
       {% comment %}theme-check-enable AssetPreload{% endcomment %}
-    {%- endunless -%}
-    {%- unless settings.type_header_font.system? -%}
+    {%- endif -%}
+    {%- if header_font_url != blank and header_font_url != body_font_url -%}
       {% comment %}theme-check-disable AssetPreload{% endcomment %}
-      <link rel="preload" as="font" href="{{ settings.type_header_font | font_url }}" type="font/woff2" crossorigin>
+      <link rel="preload" as="font" href="{{ header_font_url }}" type="font/woff2" crossorigin>
       {% comment %}theme-check-enable AssetPreload{% endcomment %}
-    {%- endunless -%}
+    {%- endif -%}
 
     {%- if localization.available_countries.size > 1 or localization.available_languages.size > 1 -%}
       {{ 'component-localization-form.css' | asset_url | stylesheet_tag: preload: true }}
