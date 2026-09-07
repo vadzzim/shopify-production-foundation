@@ -1,0 +1,39 @@
+node_modules/
+dist/
+build/
+.output/
+coverage/
+
+# Personal working material: drafts, notes, planning sources.
+# Not part of the project — never enters history.
+.tmp/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Shopify CLI
+.shopify/
+shopify.app*.toml
+!shopify.app.toml
+
+# Logs and dumps
+*.log
+npm-debug.log*
+pnpm-debug.log*
+dump/
+*.dump
+
+# Measurement artifacts. Lighthouse HTML reports are committed deliberately;
+# raw run data is not.
+.lighthouseci/
+docs/performance/raw/
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

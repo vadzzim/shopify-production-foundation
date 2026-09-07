@@ -1,0 +1,32 @@
+# Local PostgreSQL for anyone who doesn't already run one.
+# If PostgreSQL is installed locally, skip this file and just set DATABASE_URL.
+#
+#   docker compose up -d
+#   pnpm prisma migrate dev
+#
+# The point of this file is reproducibility: the project should start for anyone
+# who clones the repository, with nothing installed beyond Docker and Node.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nordlys-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nordlys
+      POSTGRES_PASSWORD: nordlys
+      POSTGRES_DB: nordlys
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Without a healthcheck, migrations start before the database accepts
+      # connections and fail on the very first run.
+      test: ["CMD-SHELL", "pg_isready -U nordlys -d nordlys"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
