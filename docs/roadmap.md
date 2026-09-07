@@ -114,6 +114,14 @@ middleware layer. See ADR-0002.
   overwritten. See ADR-0006.
 - Moving the queue from a table to BullMQ + Redis as load grows. See ADR-0007.
 
+### Rebasing the theme on Skeleton
+
+Stage 1 builds on Dawn because its third day is an Ajax cart and Skeleton ships
+no JavaScript at all. Skeleton is the better long-term base — 2,294 lines
+against Dawn's 134,066, and it has theme blocks. Porting the sections and
+converting ADR-0010's field blocks to theme blocks belongs here, once the cart
+layer exists to carry over. See [ADR-0011](adr/0011-dawn-over-skeleton-theme.md).
+
 ### Extension points
 
 - `bundle-block` — theme app extension: the merchant inserts the block from the

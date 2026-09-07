@@ -45,6 +45,12 @@ recorded either in the code or in an ADR.
 Express layer for the webhook receiver and the worker.
 **Stage 2:** migrate the app to option 2 (see ADR-0002).
 
+> **Note added 2026-09-07.** The options above concern the app, not the theme
+> base: "Dawn-based" was carried into this decision without alternatives being
+> listed, and Shopify's Skeleton theme has since become the `theme init` default.
+> The base theme choice is argued separately in
+> [ADR-0011](0011-dawn-over-skeleton-theme.md), which is authoritative on it.
+
 Monorepo on a pnpm workspace: `theme/`, `apps/`, `extensions/`, `services/`,
 `packages/shared/`.
 
