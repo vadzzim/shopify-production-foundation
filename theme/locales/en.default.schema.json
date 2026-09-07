@@ -375,6 +375,83 @@
     }
   },
   "sections": {
+    "bundle-builder": {
+      "name": "Bundle builder",
+      "presets": {
+        "name": "Bundle builder"
+      },
+      "settings": {
+        "heading": {
+          "label": "Heading",
+          "default": "Build your routine"
+        },
+        "heading_size": {
+          "label": "Heading size",
+          "options__1": {
+            "label": "Medium"
+          },
+          "options__2": {
+            "label": "Large"
+          },
+          "options__3": {
+            "label": "Extra large"
+          }
+        },
+        "button_label": {
+          "label": "Button label",
+          "default": "Add routine to cart"
+        },
+        "header_layout": {
+          "content": "Layout"
+        },
+        "products_per_step": {
+          "label": "Products per step",
+          "info": "The first products of each step's collection, in the collection's own sort order."
+        },
+        "show_price": {
+          "label": "Show prices"
+        },
+        "image_ratio": {
+          "label": "Image ratio",
+          "options__1": {
+            "label": "Square"
+          },
+          "options__2": {
+            "label": "Portrait"
+          },
+          "options__3": {
+            "label": "Landscape"
+          }
+        },
+        "color_scheme": {
+          "label": "Color scheme"
+        },
+        "header_padding": {
+          "content": "Padding"
+        },
+        "padding_top": {
+          "label": "Top padding"
+        },
+        "padding_bottom": {
+          "label": "Bottom padding"
+        }
+      },
+      "blocks": {
+        "step": {
+          "name": "Step",
+          "settings": {
+            "collection": {
+              "label": "Collection",
+              "info": "The customer picks one product from this collection. A step with no collection is not shown."
+            },
+            "label": {
+              "label": "Step name",
+              "info": "Leave empty to use the collection's title."
+            }
+          }
+        }
+      }
+    },
     "ingredient-highlights": {
       "name": "Ingredient highlights",
       "presets": {

@@ -39,6 +39,48 @@
         "show_text_below": false
       }
     },
+    "bundle_builder": {
+      "type": "bundle-builder",
+      "blocks": {
+        "cleanse": {
+          "type": "step",
+          "settings": {
+            "collection": "cleanse",
+            "label": "Cleanse"
+          }
+        },
+        "treat": {
+          "type": "step",
+          "settings": {
+            "collection": "treat",
+            "label": "Treat"
+          }
+        },
+        "moisturize": {
+          "type": "step",
+          "settings": {
+            "collection": "moisturize",
+            "label": "Moisturise"
+          }
+        }
+      },
+      "block_order": [
+        "cleanse",
+        "treat",
+        "moisturize"
+      ],
+      "settings": {
+        "heading": "Build your routine",
+        "heading_size": "large",
+        "button_label": "Add routine to cart",
+        "products_per_step": 4,
+        "show_price": true,
+        "image_ratio": "square",
+        "color_scheme": "scheme-1",
+        "padding_top": 44,
+        "padding_bottom": 44
+      }
+    },
     "featured_collection": {
       "type": "featured-collection",
       "settings": {
@@ -70,6 +112,7 @@
   },
   "order": [
     "image_banner",
+    "bundle_builder",
     "featured_collection"
   ]
 }

@@ -1,0 +1,109 @@
+{% doc %}
+  Renders one step of the bundle builder: a radio group over the products of
+  the step's collection, one choice per step.
+
+  Radios rather than a scripted list of cards: the browser already enforces
+  "exactly one of these", keyboard support and the accessible group name come
+  from `fieldset` plus `legend`, and the component only has to read
+  `input:checked`.
+
+  @param {object} block - A `step` block of the bundle-builder section.
+  @param {number} step_number - 1-based position among the steps actually rendered.
+  @param {number} products_per_step - How many products of the collection to offer.
+  @param {boolean} show_price - Whether to show each product's price.
+  @param {string} image_sizes - Value for the image's sizes attribute.
+  @param {string} section_id - The section id, used to keep radio group names unique.
+
+  @example
+  {% render 'bundle-step',
+    block: block,
+    step_number: 1,
+    products_per_step: 4,
+    show_price: true,
+    image_sizes: image_sizes,
+    section_id: section.id
+  %}
+{% enddoc %}
+
+{%- liquid
+  assign step_collection = block.settings.collection
+  assign step_label = block.settings.label
+  if step_label == blank
+    assign step_label = step_collection.title
+  endif
+  assign group_name = 'bundle-' | append: section_id | append: '-step-' | append: step_number
+-%}
+
+<fieldset
+  class="bundle-builder__step"
+  data-bundle-step
+  {{ block.shopify_attributes }}
+>
+  <legend class="bundle-builder__legend">
+    <span class="bundle-builder__step-number">
+      {{- 'sections.bundle_builder.step_number' | t: number: step_number -}}
+    </span>
+    <span class="bundle-builder__step-label">{{ step_label | escape }}</span>
+  </legend>
+
+  <div class="bundle-builder__options">
+    {%- for step_product in step_collection.products limit: products_per_step -%}
+      {%- liquid
+        assign step_variant = step_product.selected_or_first_available_variant
+        if step_variant == blank
+          assign step_variant = step_product.variants.first
+        endif
+
+        assign is_available = false
+        if step_variant != blank and step_variant.available
+          assign is_available = true
+        endif
+      -%}
+
+      {%- if step_variant == blank -%}
+        {%- continue -%}
+      {%- endif -%}
+
+      <label class="bundle-builder__option{% unless is_available %} bundle-builder__option--unavailable{% endunless %}">
+        <input
+          class="bundle-builder__radio"
+          type="radio"
+          name="{{ group_name }}"
+          value="{{ step_variant.id }}"
+          {% unless is_available %}
+            disabled
+          {% endunless %}
+        >
+
+        <span class="bundle-builder__option-media">
+          {%- if step_product.featured_image != blank -%}
+            {{
+              step_product.featured_image
+              | image_url: width: 800
+              | image_tag:
+                widths: '150, 200, 300, 400, 500, 600, 800',
+                sizes: image_sizes,
+                class: 'bundle-builder__image',
+                loading: 'lazy',
+                alt: ''
+            }}
+          {%- else -%}
+            {{ 'product-1' | placeholder_svg_tag: 'bundle-builder__image' }}
+          {%- endif -%}
+        </span>
+
+        <span class="bundle-builder__option-title">{{ step_product.title | escape }}</span>
+
+        {%- if show_price -%}
+          <span class="bundle-builder__option-price">{{ step_variant.price | money }}</span>
+        {%- endif -%}
+
+        {%- unless is_available -%}
+          <span class="bundle-builder__option-sold-out">
+            {{- 'sections.bundle_builder.sold_out' | t -}}
+          </span>
+        {%- endunless -%}
+      </label>
+    {%- endfor -%}
+  </div>
+</fieldset>

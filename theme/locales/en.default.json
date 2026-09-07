@@ -267,6 +267,27 @@
     }
   },
   "sections": {
+    "bundle_builder": {
+      "step_number": "Step {{ number }}",
+      "sold_out": "Sold out",
+      "adding": "Adding to cart…",
+      "view_cart": "View cart",
+      "success": {
+        "one": "{{ count }} product added to your cart.",
+        "other": "{{ count }} products added to your cart."
+      },
+      "no_js": "Building a routine needs JavaScript: all of its products are added to the cart in one request.",
+      "editor_no_steps": "Add a step for each stage of the routine and pick the collection it draws from. Steps without a collection are not shown on the storefront.",
+      "editor_step_without_collection": "This step has no collection selected, so it is not shown on the storefront.",
+      "errors": {
+        "incomplete": "Pick one product for every step to complete the routine.",
+        "unavailable": "One of the products in this routine has just sold out, so nothing was added to your cart. Pick another one and try again.",
+        "variant_missing": "One of the products in this routine is no longer for sale, so nothing was added to your cart. Reload the page to see what is available.",
+        "network": "We could not reach the store, so your cart has not changed. Check your connection and try again.",
+        "generic": "This routine could not be added to your cart, and your cart has not changed. Please try again.",
+        "step_sold_out": "Every product in one of the steps is sold out, so this routine cannot be built right now."
+      }
+    },
     "announcements": {
       "previous_announcement": "Previous announcement",
       "next_announcement": "Next announcement",

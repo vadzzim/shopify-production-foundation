@@ -1,0 +1,241 @@
+/*
+ * bundle-builder
+ *
+ * Self-contained apart from three theme affordances used in the markup:
+ * `page-width`, `color-<scheme>` / `gradient` and `button`. Everything the
+ * section draws itself is defined here, so moving the section to another base
+ * theme means replacing those three classes and nothing else. Colours are
+ * derived from `currentColor` rather than the theme's colour variables for the
+ * same reason.
+ */
+
+.bundle-builder__intro {
+  margin: 0 0 2.4rem;
+  max-width: 60ch;
+}
+
+/*
+ * The heading is sized here rather than with the base theme's `h0`/`h1`/`h2`
+ * classes. `--font-heading-family` and `--font-heading-scale` are used with
+ * fallbacks: on Dawn the heading matches the rest of the page, and on a theme
+ * that does not define them it still renders sensibly.
+ */
+.bundle-builder__heading {
+  font-family: var(--font-heading-family, inherit);
+  line-height: 1.2;
+  margin: 0 0 1rem;
+}
+
+.bundle-builder__heading--medium {
+  font-size: calc(var(--font-heading-scale, 1) * 2.4rem);
+}
+
+.bundle-builder__heading--large {
+  font-size: calc(var(--font-heading-scale, 1) * 3rem);
+}
+
+.bundle-builder__heading--x-large {
+  font-size: calc(var(--font-heading-scale, 1) * 3.6rem);
+}
+
+@media screen and (min-width: 750px) {
+  .bundle-builder__heading--medium {
+    font-size: calc(var(--font-heading-scale, 1) * 2.8rem);
+  }
+
+  .bundle-builder__heading--large {
+    font-size: calc(var(--font-heading-scale, 1) * 4rem);
+  }
+
+  .bundle-builder__heading--x-large {
+    font-size: calc(var(--font-heading-scale, 1) * 5.2rem);
+  }
+}
+
+.bundle-builder__steps {
+  display: grid;
+  gap: 2.8rem;
+  margin: 0;
+}
+
+.bundle-builder__step {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.bundle-builder__legend {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  padding: 0 0 1.2rem;
+}
+
+.bundle-builder__step-number {
+  border: 0.1rem solid currentColor;
+  border-radius: 10rem;
+  font-size: 1.1rem;
+  letter-spacing: 0.08rem;
+  opacity: 0.7;
+  padding: 0.2rem 0.9rem;
+  text-transform: uppercase;
+}
+
+.bundle-builder__step-label {
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+.bundle-builder__options {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media screen and (min-width: 750px) {
+  .bundle-builder__options {
+    grid-template-columns: repeat(var(--bundle-columns, 4), minmax(0, 1fr));
+  }
+}
+
+.bundle-builder__option {
+  border: 0.1rem solid currentColor;
+  border-radius: 0.8rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.6rem;
+  opacity: 0.62;
+  padding: 1rem;
+  position: relative;
+  transition: opacity 150ms ease, box-shadow 150ms ease;
+}
+
+.bundle-builder__option:hover {
+  opacity: 0.85;
+}
+
+.bundle-builder__option:has(input:checked) {
+  box-shadow: inset 0 0 0 0.1rem currentColor;
+  opacity: 1;
+}
+
+.bundle-builder__option:has(input:focus-visible) {
+  outline: 0.2rem solid currentColor;
+  outline-offset: 0.3rem;
+}
+
+.bundle-builder__option--unavailable {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.bundle-builder__option--unavailable:hover {
+  opacity: 0.4;
+}
+
+/*
+ * The radio stays in the accessibility tree and in the tab order — it is only
+ * moved out of sight. `display: none` or `visibility: hidden` would make the
+ * group unreachable by keyboard.
+ */
+.bundle-builder__radio {
+  height: 0.1rem;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 0.1rem;
+}
+
+.bundle-builder__option-media {
+  aspect-ratio: var(--bundle-image-ratio, 1);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.bundle-builder__image {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.bundle-builder__option-title {
+  font-size: 1.4rem;
+  line-height: 1.3;
+}
+
+.bundle-builder__option-price {
+  font-size: 1.3rem;
+  opacity: 0.75;
+}
+
+.bundle-builder__option-sold-out {
+  font-size: 1.1rem;
+  letter-spacing: 0.06rem;
+  text-transform: uppercase;
+}
+
+.bundle-builder__footer {
+  margin-top: 2.8rem;
+}
+
+.bundle-builder__submit {
+  min-width: 24rem;
+}
+
+.bundle-builder__submit[aria-busy='true'] {
+  cursor: progress;
+}
+
+.bundle-builder__noscript,
+.bundle-builder__unbuildable {
+  margin: 0;
+  max-width: 60ch;
+}
+
+/*
+ * The feedback paragraph is a live region: it keeps its place in the layout
+ * while empty, so the margin is attached to the non-empty state only.
+ */
+.bundle-builder__message,
+.bundle-builder__detail {
+  margin: 0;
+  max-width: 60ch;
+}
+
+.bundle-builder__message:not(:empty) {
+  font-weight: 600;
+  margin-top: 1.4rem;
+}
+
+.bundle-builder__detail:not(:empty) {
+  margin-top: 0.4rem;
+  opacity: 0.8;
+}
+
+/*
+ * Tinted rather than replaced: mixing with `currentColor` keeps the message
+ * readable on every colour scheme, including a dark one, where a fixed red or
+ * green would not be.
+ */
+.bundle-builder__message--error {
+  color: color-mix(in oklab, currentColor 60%, #d72c0d);
+}
+
+.bundle-builder__message--success {
+  color: color-mix(in oklab, currentColor 60%, #0a7d3f);
+}
+
+.bundle-builder__cart-link {
+  display: inline-block;
+  margin-top: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bundle-builder__option {
+    transition: none;
+  }
+}

@@ -1,0 +1,318 @@
+{%- liquid
+  assign products_per_step = section.settings.products_per_step
+
+  assign step_count = 0
+  assign unbuildable = false
+  for block in section.blocks
+    assign step_collection = block.settings.collection
+    if step_collection == blank
+      continue
+    endif
+
+    assign step_count = step_count | plus: 1
+
+    assign available_in_step = 0
+    for step_product in step_collection.products limit: products_per_step
+      if step_product.available
+        assign available_in_step = available_in_step | plus: 1
+      endif
+    endfor
+    if available_in_step == 0
+      assign unbuildable = true
+    endif
+  endfor
+
+  case section.settings.image_ratio
+    when 'portrait'
+      assign image_ratio = '3 / 4'
+    when 'landscape'
+      assign image_ratio = '4 / 3'
+    else
+      assign image_ratio = '1'
+  endcase
+-%}
+
+{%- comment -%}
+  A step block with no collection selected contributes nothing, so a section
+  with no usable step renders nothing at all on the storefront — no heading, no
+  stylesheet request. In the theme editor it renders an explanation instead,
+  because a section that is silently absent is impossible to configure. The
+  asset tags sit inside this guard for the same reason: a section that renders
+  nothing must not cost requests either.
+{%- endcomment -%}
+{%- if step_count > 0 or request.design_mode -%}
+  {{ 'section-bundle-builder.css' | asset_url | stylesheet_tag }}
+  <script src="{{ 'bundle-builder.js' | asset_url }}" defer="defer"></script>
+
+  {%- style -%}
+    .section-{{ section.id }}-padding {
+      padding-top: {{ section.settings.padding_top | times: 0.75 | round: 0 }}px;
+      padding-bottom: {{ section.settings.padding_bottom | times: 0.75 | round: 0 }}px;
+    }
+
+    @media screen and (min-width: 750px) {
+      .section-{{ section.id }}-padding {
+        padding-top: {{ section.settings.padding_top }}px;
+        padding-bottom: {{ section.settings.padding_bottom }}px;
+      }
+    }
+  {%- endstyle -%}
+
+  {%- capture image_sizes -%}
+    (min-width: 990px) calc({{ settings.page_width | default: 1200 }}px / {{ products_per_step }}), (min-width: 750px) calc(100vw / {{ products_per_step }}), 50vw
+  {%- endcapture -%}
+
+  <div class="bundle-builder color-{{ section.settings.color_scheme }} gradient">
+    <div class="page-width section-{{ section.id }}-padding">
+      {%- unless section.settings.heading == blank -%}
+        <div class="bundle-builder__intro">
+          <h2 class="bundle-builder__heading bundle-builder__heading--{{ section.settings.heading_size }}">
+            {{ section.settings.heading }}
+          </h2>
+        </div>
+      {%- endunless -%}
+
+      {%- if step_count == 0 -%}
+        <p class="bundle-builder__unbuildable">{{ 'sections.bundle_builder.editor_no_steps' | t }}</p>
+      {%- else -%}
+        <bundle-builder
+          class="bundle-builder__widget"
+          style="--bundle-image-ratio: {{ image_ratio }}; --bundle-columns: {{ products_per_step }};"
+        >
+          {%- comment -%}
+            The component's own strings travel with the section instead of
+            being appended to the theme's global `cartStrings`, so the section
+            carries its translations wherever it is copied.
+          {%- endcomment -%}
+          <script type="application/json" data-bundle-strings>
+            {
+              "incomplete": {{ 'sections.bundle_builder.errors.incomplete' | t | json }},
+              "unavailable": {{ 'sections.bundle_builder.errors.unavailable' | t | json }},
+              "variant_missing": {{ 'sections.bundle_builder.errors.variant_missing' | t | json }},
+              "network": {{ 'sections.bundle_builder.errors.network' | t | json }},
+              "generic": {{ 'sections.bundle_builder.errors.generic' | t | json }},
+              "adding": {{ 'sections.bundle_builder.adding' | t | json }},
+              "success": {{ 'sections.bundle_builder.success' | t: count: step_count | json }}
+            }
+          </script>
+
+          <div class="bundle-builder__steps">
+            {%- assign step_number = 0 -%}
+            {%- for block in section.blocks -%}
+              {%- if block.settings.collection == blank -%}
+                {%- if request.design_mode -%}
+                  <p class="bundle-builder__unbuildable" {{ block.shopify_attributes }}>
+                    {{- 'sections.bundle_builder.editor_step_without_collection' | t -}}
+                  </p>
+                {%- endif -%}
+                {%- continue -%}
+              {%- endif -%}
+
+              {%- assign step_number = step_number | plus: 1 -%}
+              {%- render 'bundle-step',
+                block: block,
+                step_number: step_number,
+                products_per_step: products_per_step,
+                show_price: section.settings.show_price,
+                image_sizes: image_sizes,
+                section_id: section.id
+              -%}
+            {%- endfor -%}
+          </div>
+
+          <div class="bundle-builder__footer">
+            {%- if unbuildable -%}
+              {%- comment -%}
+                Every product of at least one step is sold out, so no complete
+                bundle exists. The button is not rendered at all rather than
+                rendered and rejected on click.
+              {%- endcomment -%}
+              <p class="bundle-builder__unbuildable">{{ 'sections.bundle_builder.errors.step_sold_out' | t }}</p>
+            {%- else -%}
+              <button
+                class="bundle-builder__submit button"
+                type="button"
+                data-bundle-submit
+                disabled
+              >
+                <span data-bundle-submit-label>{{ section.settings.button_label | escape }}</span>
+              </button>
+              <noscript>
+                <p class="bundle-builder__noscript">{{ 'sections.bundle_builder.no_js' | t }}</p>
+              </noscript>
+            {%- endif -%}
+
+            <p
+              class="bundle-builder__message"
+              data-bundle-message
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            ></p>
+            <p class="bundle-builder__detail" data-bundle-detail></p>
+            <a
+              class="bundle-builder__cart-link"
+              href="{{ routes.cart_url }}"
+              data-bundle-cart-link
+              hidden
+            >
+              {{- 'sections.bundle_builder.view_cart' | t -}}
+            </a>
+          </div>
+        </bundle-builder>
+      {%- endif -%}
+    </div>
+  </div>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "t:sections.bundle-builder.name",
+  "tag": "section",
+  "class": "section",
+  "disabled_on": {
+    "groups": ["header", "footer"]
+  },
+  "settings": [
+    {
+      "type": "inline_richtext",
+      "id": "heading",
+      "default": "t:sections.bundle-builder.settings.heading.default",
+      "label": "t:sections.bundle-builder.settings.heading.label"
+    },
+    {
+      "type": "select",
+      "id": "heading_size",
+      "options": [
+        {
+          "value": "medium",
+          "label": "t:sections.bundle-builder.settings.heading_size.options__1.label"
+        },
+        {
+          "value": "large",
+          "label": "t:sections.bundle-builder.settings.heading_size.options__2.label"
+        },
+        {
+          "value": "x-large",
+          "label": "t:sections.bundle-builder.settings.heading_size.options__3.label"
+        }
+      ],
+      "default": "medium",
+      "label": "t:sections.bundle-builder.settings.heading_size.label"
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "default": "t:sections.bundle-builder.settings.button_label.default",
+      "label": "t:sections.bundle-builder.settings.button_label.label"
+    },
+    {
+      "type": "header",
+      "content": "t:sections.bundle-builder.settings.header_layout.content"
+    },
+    {
+      "type": "range",
+      "id": "products_per_step",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "default": 4,
+      "label": "t:sections.bundle-builder.settings.products_per_step.label",
+      "info": "t:sections.bundle-builder.settings.products_per_step.info"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_price",
+      "default": true,
+      "label": "t:sections.bundle-builder.settings.show_price.label"
+    },
+    {
+      "type": "select",
+      "id": "image_ratio",
+      "options": [
+        {
+          "value": "square",
+          "label": "t:sections.bundle-builder.settings.image_ratio.options__1.label"
+        },
+        {
+          "value": "portrait",
+          "label": "t:sections.bundle-builder.settings.image_ratio.options__2.label"
+        },
+        {
+          "value": "landscape",
+          "label": "t:sections.bundle-builder.settings.image_ratio.options__3.label"
+        }
+      ],
+      "default": "square",
+      "label": "t:sections.bundle-builder.settings.image_ratio.label"
+    },
+    {
+      "type": "color_scheme",
+      "id": "color_scheme",
+      "default": "scheme-1",
+      "label": "t:sections.bundle-builder.settings.color_scheme.label"
+    },
+    {
+      "type": "header",
+      "content": "t:sections.bundle-builder.settings.header_padding.content"
+    },
+    {
+      "type": "range",
+      "id": "padding_top",
+      "min": 0,
+      "max": 100,
+      "step": 4,
+      "unit": "px",
+      "default": 44,
+      "label": "t:sections.bundle-builder.settings.padding_top.label"
+    },
+    {
+      "type": "range",
+      "id": "padding_bottom",
+      "min": 0,
+      "max": 100,
+      "step": 4,
+      "unit": "px",
+      "default": 44,
+      "label": "t:sections.bundle-builder.settings.padding_bottom.label"
+    }
+  ],
+  "max_blocks": 5,
+  "blocks": [
+    {
+      "type": "step",
+      "name": "t:sections.bundle-builder.blocks.step.name",
+      "settings": [
+        {
+          "type": "collection",
+          "id": "collection",
+          "label": "t:sections.bundle-builder.blocks.step.settings.collection.label",
+          "info": "t:sections.bundle-builder.blocks.step.settings.collection.info"
+        },
+        {
+          "type": "text",
+          "id": "label",
+          "label": "t:sections.bundle-builder.blocks.step.settings.label.label",
+          "info": "t:sections.bundle-builder.blocks.step.settings.label.info"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "t:sections.bundle-builder.presets.name",
+      "blocks": [
+        {
+          "type": "step"
+        },
+        {
+          "type": "step"
+        },
+        {
+          "type": "step"
+        }
+      ]
+    }
+  ]
+}
+{% endschema %}
