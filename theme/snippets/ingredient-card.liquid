@@ -1,0 +1,90 @@
+{% doc %}
+  Renders one ingredient card: the `ingredient` metaobject fields that the
+  merchant enabled as blocks, in the order the blocks appear in the section.
+
+  @param {object} ingredient - An `ingredient` metaobject entry.
+  @param {object} blocks - The section's blocks. Block order is field order.
+  @param {string} image_ratio - Dawn media ratio modifier: square, portrait, landscape or circle.
+  @param {string} image_sizes - Value for the image's sizes attribute.
+  @param {boolean} name_shown - Whether the section renders a name block. Drives the image alt text.
+  @param {number} card_index - 1-based position among the cards actually rendered.
+
+  @example
+  {% render 'ingredient-card',
+    ingredient: ingredient,
+    blocks: section.blocks,
+    image_ratio: 'square',
+    image_sizes: image_sizes,
+    name_shown: true,
+    card_index: 1
+  %}
+{% enddoc %}
+
+{%- comment -%}
+  The same block renders once per ingredient, so the theme editor attributes are
+  emitted on the first card only. That keeps every block id unique in the DOM
+  while still giving the editor an element to select and reorder.
+{%- endcomment -%}
+{%- liquid
+  assign image_alt = ''
+  unless name_shown
+    assign image_alt = ingredient.name.value
+  endunless
+-%}
+
+<div class="ingredient-card">
+  {%- for block in blocks -%}
+    {%- case block.type -%}
+      {%- when 'image' -%}
+        {%- if ingredient.image.value != blank -%}
+          <div
+            class="ingredient-card__media media media--{{ image_ratio }}"
+            {% if card_index == 1 %}{{ block.shopify_attributes }}{% endif %}
+          >
+            {{
+              ingredient.image.value
+              | image_url: width: 1200
+              | image_tag:
+                widths: '100, 150, 200, 300, 400, 500, 600, 750, 900, 1200',
+                sizes: image_sizes,
+                class: 'ingredient-card__image',
+                loading: 'lazy',
+                alt: image_alt
+            }}
+          </div>
+        {%- endif -%}
+
+      {%- when 'name' -%}
+        <h3
+          class="ingredient-card__name h4"
+          {% if card_index == 1 %}{{ block.shopify_attributes }}{% endif %}
+        >
+          {{- ingredient.name.value | escape -}}
+        </h3>
+
+      {%- when 'benefit' -%}
+        {%- if ingredient.benefit.value != blank -%}
+          <p
+            class="ingredient-card__benefit"
+            {% if card_index == 1 %}{{ block.shopify_attributes }}{% endif %}
+          >
+            {{- ingredient.benefit.value | escape -}}
+          </p>
+        {%- endif -%}
+
+      {%- when 'description' -%}
+        {%- if ingredient.description.value != blank -%}
+          <div
+            class="ingredient-card__description rte"
+            {% if card_index == 1 %}{{ block.shopify_attributes }}{% endif %}
+          >
+            {%- if block.settings.truncate_words > 0 -%}
+              {{- ingredient.description.value | truncatewords: block.settings.truncate_words | escape | newline_to_br -}}
+            {%- else -%}
+              {{- ingredient.description.value | escape | newline_to_br -}}
+            {%- endif -%}
+          </div>
+        {%- endif -%}
+    {%- endcase -%}
+  {%- endfor -%}
+</div>
