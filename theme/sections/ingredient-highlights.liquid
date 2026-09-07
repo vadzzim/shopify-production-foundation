@@ -1,5 +1,3 @@
-{{ 'section-ingredient-highlights.css' | asset_url | stylesheet_tag }}
-
 {%- liquid
   assign ingredients = section.settings.ingredients
   if ingredients == blank
@@ -34,6 +32,13 @@
   markup is emitted.
 {%- endcomment -%}
 {%- if renderable_count > 0 -%}
+  {%- comment -%}
+    Inside the guard, not above it: a section that renders nothing must not cost
+    a stylesheet request either. Dawn's own sections load their CSS
+    unconditionally because they always render something; this one does not.
+  {%- endcomment -%}
+  {{ 'section-ingredient-highlights.css' | asset_url | stylesheet_tag }}
+
   {%- style -%}
     .section-{{ section.id }}-padding {
       padding-top: {{ section.settings.padding_top | times: 0.75 | round: 0 }}px;
