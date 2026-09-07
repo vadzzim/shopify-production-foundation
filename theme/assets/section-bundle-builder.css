@@ -74,11 +74,10 @@
 }
 
 .bundle-builder__step-number {
-  border: 0.1rem solid currentColor;
+  border: 0.1rem solid color-mix(in oklab, currentColor 45%, transparent);
   border-radius: 10rem;
   font-size: 1.1rem;
   letter-spacing: 0.08rem;
-  opacity: 0.7;
   padding: 0.2rem 0.9rem;
   text-transform: uppercase;
 }
@@ -100,25 +99,30 @@
   }
 }
 
+/*
+ * Selection is carried by the border, not by fading the unselected cards. The
+ * theme's body colour is already `rgba(18, 18, 18, 0.75)`, so an `opacity` on
+ * the card multiplied into it and put the product titles at about 2.9:1 against
+ * white — under the 4.5:1 the phase requires. Nothing here dims text.
+ */
 .bundle-builder__option {
-  border: 0.1rem solid currentColor;
+  border: 0.1rem solid color-mix(in oklab, currentColor 22%, transparent);
   border-radius: 0.8rem;
   cursor: pointer;
   display: grid;
   gap: 0.6rem;
-  opacity: 0.62;
   padding: 1rem;
   position: relative;
-  transition: opacity 150ms ease, box-shadow 150ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .bundle-builder__option:hover {
-  opacity: 0.85;
+  border-color: color-mix(in oklab, currentColor 45%, transparent);
 }
 
 .bundle-builder__option:has(input:checked) {
+  border-color: currentColor;
   box-shadow: inset 0 0 0 0.1rem currentColor;
-  opacity: 1;
 }
 
 .bundle-builder__option:has(input:focus-visible) {
@@ -128,10 +132,10 @@
 
 .bundle-builder__option--unavailable {
   cursor: not-allowed;
-  opacity: 0.4;
 }
 
-.bundle-builder__option--unavailable:hover {
+/* The image carries the sold-out state, because an image has no contrast floor. */
+.bundle-builder__option--unavailable .bundle-builder__option-media {
   opacity: 0.4;
 }
 
@@ -169,11 +173,11 @@
 
 .bundle-builder__option-price {
   font-size: 1.3rem;
-  opacity: 0.75;
 }
 
 .bundle-builder__option-sold-out {
   font-size: 1.1rem;
+  font-weight: 600;
   letter-spacing: 0.06rem;
   text-transform: uppercase;
 }
@@ -212,8 +216,8 @@
 }
 
 .bundle-builder__detail:not(:empty) {
+  font-size: 1.3rem;
   margin-top: 0.4rem;
-  opacity: 0.8;
 }
 
 /*
@@ -232,6 +236,15 @@
 .bundle-builder__cart-link {
   display: inline-block;
   margin-top: 1rem;
+}
+
+/*
+ * An author `display` beats the user agent's rule for the `hidden` attribute,
+ * so the link has to opt back out explicitly. Without this the "View cart"
+ * link is visible before anything has been added.
+ */
+.bundle-builder__cart-link[hidden] {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
