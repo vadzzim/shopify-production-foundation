@@ -5,25 +5,52 @@ on:
   push:
     branches: [main]
 
+env:
+  # Keep in step with .nvmrc. Node 20 reached end of life on 2026-04-30 and no
+  # longer receives security patches.
+  NODE_VERSION: 24
+
 jobs:
   app:
     name: App — typecheck, lint, test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The app does not exist yet — see "Repository state" in CLAUDE.md. Until
+      # package.json lands, the job reports success rather than failing on a
+      # missing manifest, and says so in the run summary. Delete this guard and
+      # the `if:` conditions below in the commit that adds package.json.
+      - id: manifest
+        run: |
+          if [ -f package.json ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo '::notice title=App checks skipped::No package.json in the repository yet.'
+          fi
+
       - uses: pnpm/action-setup@v4
+        if: steps.manifest.outputs.present == 'true'
         with:
-          version: 9
+          # Must match the major version of the lockfile format. Local pnpm is
+          # 10.x; on 9 a v10 lockfile fails --frozen-lockfile.
+          version: 10
       - uses: actions/setup-node@v4
+        if: steps.manifest.outputs.present == 'true'
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test -- --coverage
+      - if: steps.manifest.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.manifest.outputs.present == 'true'
+        run: pnpm typecheck
+      - if: steps.manifest.outputs.present == 'true'
+        run: pnpm lint
+      - if: steps.manifest.outputs.present == 'true'
+        run: pnpm test -- --coverage
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.manifest.outputs.present == 'true'
         with:
           name: coverage
           path: coverage/
@@ -35,7 +62,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm i -g @shopify/cli@latest
       - run: shopify theme check --path theme --fail-level error
 
@@ -56,11 +83,14 @@ jobs:
     # Non-blocking on purpose: Lighthouse in CI is noisy enough that it belongs
     # in the report, not in the merge gate. See the CI section in docs/roadmap.md.
     continue-on-error: true
+    # The preview theme URL is set once the theme is pushed as unpublished
+    # (docs/development.md). Without it there is nothing to measure.
+    if: vars.PREVIEW_THEME_URL != ''
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
       - name: Run Lighthouse against the preview theme
         run: |
           npx --yes @lhci/cli@latest autorun \
