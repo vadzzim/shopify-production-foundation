@@ -10,7 +10,7 @@ the `ingredient-highlights` section (Phase 1) renders them on the product page.
 
 An ingredient is not a loose string. It carries four fields — name, description,
 benefit, image — and the same ingredient appears on several products. In the
-reference catalog: six ingredients across twelve products, twenty-four
+reference catalog: six ingredients across twelve products, twenty-five
 product-to-ingredient links, with each ingredient used by three to six products.
 
 Constraints that shape the decision:
@@ -38,7 +38,7 @@ One metafield per ingredient slot: `custom.ingredient_1_name`,
 
 - ➕ No new concepts; a definition and a value, nothing else.
 - ➖ Every description is stored once per product. Six ingredients over
-  twenty-four links means twenty-four copies to keep in step by hand, and they
+  twenty-five links means twenty-five copies to keep in step by hand, and they
   will drift.
 - ➖ The number of slots is fixed at definition time. A fourth ingredient on one
   product means a schema change for all products.
@@ -107,7 +107,7 @@ The two decisions above come from the same rule, applied twice:
 An ingredient is reused — three to six products each — and has four fields.
 A routine step is used by exactly one product, is a single value, and has no
 structure. Putting the step in a metaobject would add indirection with nothing
-on the other side of it; putting the ingredient in metafields buys twenty-four
+on the other side of it; putting the ingredient in metafields buys twenty-five
 copies of six descriptions.
 
 What tipped option 3 over option 2 specifically was **where errors surface**.
