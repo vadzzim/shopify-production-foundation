@@ -1,0 +1,76 @@
+# Development
+
+## Requirements
+
+- Node 20+
+- pnpm
+- Docker (or a locally installed PostgreSQL)
+- Shopify CLI: `npm i -g @shopify/cli@latest`
+- A Shopify Partner account and a development store
+
+## Getting started
+
+```bash
+docker compose up -d
+pnpm install
+cp .env.example .env
+pnpm prisma migrate dev
+```
+
+If PostgreSQL is already installed locally, skip Docker and set `DATABASE_URL`
+in `.env`.
+
+Then:
+
+```bash
+pnpm --filter admin-app dev                # the app
+shopify app dev                            # tunnel + install on the dev store
+shopify theme dev --store $SHOPIFY_STORE   # theme with hot reload
+```
+
+`shopify app dev` provisions the tunnel itself. The tunnel URL is ephemeral and
+is not committed to config — a stable HTTPS URL is only needed for a deployment,
+see ADR-0008.
+
+## Useful commands
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm prisma studio                  # database GUI
+shopify theme check --path theme
+shopify theme push --unpublished    # stable preview URL for the theme
+```
+
+## Development store constraints
+
+- The storefront is always password-protected — a platform constraint, not a setting.
+- Real payments are not possible. Test orders go through the Bogus Gateway
+  (Settings -> Payments -> test provider).
+- Stores are frozen after extended inactivity.
+
+## Git workflow
+
+- `main` is protected: changes land through pull requests only.
+- Branches: `feat/bundle-builder`, `fix/webhook-idempotency`, `chore/ci`.
+- Conventional commits: `feat(theme): add bundle builder section`.
+- A PR states what changed, why, how it was verified, includes a screenshot for
+  UI changes, and links the ADR when an architectural decision was involved.
+
+## Definition of Done
+
+- `pnpm typecheck && pnpm lint && pnpm test` all green.
+- Theme changes: `shopify theme check` clean, no Lighthouse regression.
+- New webhook handler: an HMAC test and an idempotency test.
+- Architectural choices recorded as an ADR in [`adr/`](adr/).
+
+## Secrets
+
+Only through `process.env`, validated with zod at application startup. `.env` is
+gitignored; the current list of variables lives in `.env.example`. CI runs a
+secret scan.
+
+Rules for working with AI agents in this repository, including limits on what
+data may be shared, are in [`../CLAUDE.md`](../CLAUDE.md) and
+[`ai-workflow.md`](ai-workflow.md).
