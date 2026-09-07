@@ -18,3 +18,4 @@ in showing which alternatives were on the table and what was known at the time.
 | 0006 | Conflict resolution strategy for two-way sync | *roadmap v2* |
 | [0007](0007-database-and-orm.md) | PostgreSQL + Prisma, queue on a table | accepted |
 | [0008](0008-hosting-topology.md) | Hosting: local runtime plus theme preview | accepted |
+| [0009](0009-admin-api-version.md) | Admin API version pinned to 2026-07 | accepted |

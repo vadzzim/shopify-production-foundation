@@ -40,7 +40,8 @@ say so instead of improvising** — a missing file is never a licence to guess.
    `packages/shared/src/api-version.ts` (planned — see Repository state) and
    nowhere else. Never hardcode it inline, never read it from an env var, and
    never take it from model memory — confirm the current stable version through
-   the Shopify Dev MCP.
+   the Shopify Dev MCP. The pinned version is **2026-07**; rationale and upgrade
+   trigger in ADR-0009.
 2. **Always handle `userErrors`.** Any GraphQL mutation can return 200 and still
    not apply. Code that ignores `userErrors` does not pass review.
 3. **Webhooks.** Verify the HMAC against the raw `Buffer` before JSON parsing,
