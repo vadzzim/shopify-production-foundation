@@ -27,7 +27,7 @@ say so instead of improvising** — a missing file is never a licence to guess.
 ## Stack
 
 - Theme: Liquid, Dawn-based, vanilla JS (web components). Do not add libraries.
-- App: TypeScript strict, Node 20, Express, React, Polaris, App Bridge.
+- App: TypeScript strict, Node 24, Express, React, Polaris, App Bridge.
 - Data: PostgreSQL + Prisma. Queue: a table in the same database
   (`FOR UPDATE SKIP LOCKED`), no Redis. Rationale in ADR-0007.
 - Tests: Vitest + supertest. E2E: Playwright.

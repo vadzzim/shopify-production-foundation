@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node 20+
+- Node 24 (Active LTS). The version is pinned in `.nvmrc`.
 - pnpm
 - Docker (or a locally installed PostgreSQL)
 - Shopify CLI: `npm i -g @shopify/cli@latest`
