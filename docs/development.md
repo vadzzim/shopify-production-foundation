@@ -31,7 +31,7 @@ Then:
 ```bash
 pnpm --filter admin-app dev                # the app
 shopify app dev                            # tunnel + install on the dev store
-shopify theme dev --store $SHOPIFY_STORE   # theme with hot reload
+shopify theme dev --path theme --store $SHOPIFY_STORE   # hot reload
 ```
 
 `shopify app dev` provisions the tunnel itself. The tunnel URL is ephemeral and
@@ -46,7 +46,7 @@ pnpm lint
 pnpm test
 pnpm prisma studio                  # database GUI
 shopify theme check --path theme
-shopify theme push --unpublished    # stable preview URL for the theme
+shopify theme push --path theme --unpublished    # stable preview URL
 ```
 
 ## Development store constraints
