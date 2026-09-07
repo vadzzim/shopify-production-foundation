@@ -15,11 +15,12 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done
 
 Custom routine sets and product page performance.
 
-- [ ] Dawn-based theme, Online Store 2.0 structure
+- [x] Dawn-based theme, Online Store 2.0 structure
 - [x] Metaobject `ingredient` plus metafields `custom.ingredients`,
       `custom.routine_step` — see [ADR-0003](adr/0003-metaobjects-for-ingredients.md)
-- [ ] `ingredient-highlights` section — complete schema (`settings`, `blocks`,
-      `presets`), assemblable by a merchant in the theme editor without code changes
+- [x] `ingredient-highlights` section — complete schema (`settings`, `blocks`,
+      `presets`), assemblable by a merchant in the theme editor without code
+      changes — see [ADR-0010](adr/0010-section-composition-field-blocks.md)
 - [ ] `bundle-builder` section — pick three products by routine step, add to cart
       in a single `/cart/add.js` request, line items linked by the `_bundle_id`
       line item property
