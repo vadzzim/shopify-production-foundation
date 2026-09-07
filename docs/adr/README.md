@@ -20,3 +20,4 @@ in showing which alternatives were on the table and what was known at the time.
 | [0008](0008-hosting-topology.md) | Hosting: local runtime plus theme preview | accepted |
 | [0009](0009-admin-api-version.md) | Admin API version pinned to 2026-07 | accepted |
 | [0010](0010-section-composition-field-blocks.md) | Section blocks are the card's fields, not the ingredients | accepted |
+| [0011](0011-dawn-over-skeleton-theme.md) | Dawn over the Skeleton theme as the base for stage 1 | accepted |
