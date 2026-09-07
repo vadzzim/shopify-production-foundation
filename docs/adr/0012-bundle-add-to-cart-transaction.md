@@ -30,14 +30,36 @@ Dev MCP rather than from memory:
 - Bundled section rendering (`sections`, `sections_url`) works on `/cart/add`,
   so up to five sections can be re-rendered from the same response. This is how
   the header cart count stays truthful with no second round trip.
-- Cart errors come back as HTTP 422 (`"already sold out"`, `"You can't add
-  more"`) or 404 (`"Cannot find variant"`) with a `status` field in the body.
-  They resolve the fetch promise like a success, so failing to inspect the body
-  means reporting success for an empty cart.
+- Cart errors come back with a `status` field in the body and resolve the fetch
+  promise like a success, so failing to inspect the body means reporting success
+  for an empty cart.
 - **Whether a multi-line add is atomic is not documented.** The error shapes are
   specified; what happens to the other lines when one of them fails is not.
 
 That last gap is the decision. Everything else follows from the documentation.
+
+## What was measured
+
+Three probes against the development store, from the storefront session, since
+the documentation does not answer the question:
+
+| Request | Result | Cart afterwards |
+|---|---|---|
+| valid line + a variant id that does not exist | 422 `"Cannot find variant"` | empty — nothing added |
+| valid line + a line whose variant's whole stock is already in the cart | 422 `"You can't add more…"` | unchanged — nothing added |
+| valid line + a line asking 999 of a variant with 50 in stock | 422 `"Only 50 items were added to your cart due to availability."` | **51 items: the capped line landed, and so did the valid one** |
+
+Two things follow, and both changed the code:
+
+1. **A multi-line add is not atomic in general.** The third probe is a partial
+   add, so atomicity is not a property of the endpoint that can be relied on.
+   With the quantity this section actually sends — always 1 — both reachable
+   failures came back atomic, which is a fact about today's UI, not about the
+   API.
+2. **The status does not identify the failure.** Everything above is 422,
+   including `"Cannot find variant"`, which the documentation shows as 404 for
+   `update.js`. Branching on the status code cannot tell "sold out" from
+   "variant is gone".
 
 ## Options considered
 
@@ -59,9 +81,10 @@ and passing it to each.
 Send the `items` array, and on 422/404 show a message and assume nothing landed.
 
 - ➕ No rollback code, one request.
-- ➖ Correctness rests on undocumented behaviour. If a multi-line add is not
-  atomic, the customer is told "nothing was added" while two lines sit in the
-  cart — the worst of the possible outcomes, because it is silent.
+- ➖ Correctness rests on undocumented behaviour, and the measurement above
+  shows the assumption is false for at least one input: the customer would be
+  told "nothing was added" while two lines sit in the cart. That is the worst
+  available outcome, because it is silent.
 - ➖ Undocumented behaviour is not a contract. It can change without a version
   bump, and a theme is not versioned against the Ajax API at all.
 
@@ -76,7 +99,8 @@ in a single `POST /cart/update.js`.
   rollback needs. The clean-up cannot touch a line the customer added earlier,
   even the same variant, because the id is generated per click.
 - ➖ On an atomic rejection the extra `GET` finds nothing and the code appears
-  to do nothing. It is dead weight until the day it is not.
+  to do nothing, which is what happens on both failure paths the section can
+  reach today.
 - ➖ Two extra requests on the error path.
 
 ### 4. Storefront API cart mutations
@@ -115,12 +139,20 @@ clean success.
 
 Supporting decisions taken with it:
 
-- **Errors are classified by status, not by string matching.** 422 → sold out or
-  insufficient stock; 404 → the variant no longer exists in the online store;
-  a rejected promise → the network. Each maps to its own sentence in
-  `locales/en.default.json`. Shopify's own `description` is displayed as a
-  second line, because it names the product that failed and a translated
-  sentence cannot.
+- **The failure is classified by asking the source of truth, not by the status
+  code and not by matching words in Shopify's description.** A rejected promise
+  is the network. Everything else is 422, so the component fetches
+  `/products/<handle>.js` for the chosen products and reads the answer off the
+  data: the variant is missing from the product → it was unpublished or deleted;
+  present but `available: false` → sold out; present and available while the
+  cart still refused it → the cart already holds all the stock there is. Four
+  outcomes, four sentences in `locales/en.default.json`. Shopify's own
+  `description` is shown as a second line, because it names the product that
+  failed and a translated sentence cannot.
+
+  The rejected alternative was matching `"Cannot find variant"` and `"sold
+  out"` in the description. That string is rendered in the shop's language and
+  is not part of any contract; the product JSON is.
 - **A step whose products are all sold out removes the button.** That case is
   known at render time, so the section does not offer a control that is
   guaranteed to fail. The 422 path covers the remaining window — stock running
@@ -182,10 +214,14 @@ storefront, and the visible one would be the wrong one.
 
 **Harder, and the price paid**
 
-- ⚠️ **The rollback path is hard to exercise.** Under atomic behaviour it does
-  nothing, so it is code that review cannot see working. It is commented at the
-  call site with the reason it exists, which is the only defence against a
-  future reader deleting it as unreachable.
+- ⚠️ **The rollback does not fire on any failure the section can currently
+  produce.** Both reachable failures came back atomic, so it was verified
+  against a partial state built by hand — two lines sharing a bundle id, one of
+  them capped — where it removed exactly those two and left an unrelated line
+  alone. It is commented at the call site with the reason it exists, which is
+  the only defence against a future reader deleting it as unreachable. The
+  moment a step sends a quantity above 1, the non-atomic path in the
+  measurements above becomes reachable.
 - The section requires JavaScript. A no-JS fallback would have to submit a form
   to `/cart/add` without `_bundle_id` — an unlinked bundle that looks added and
   is not discounted. The button therefore ships `disabled` and is enabled by the
@@ -199,9 +235,13 @@ storefront, and the visible one would be the wrong one.
 
 ## When to revisit
 
-- **Shopify documents the atomicity of a multi-line add** → if it is guaranteed,
-  the rollback becomes provably dead and should be deleted, with this ADR
-  superseded rather than quietly contradicted.
+- **A step sends a quantity above 1** — two of one product in a routine, say →
+  the partial add measured above becomes reachable from the UI, and the rollback
+  stops being defensive. The error text would then also need the "we added fewer
+  than you asked for" case, which today cannot happen.
+- **Shopify documents the atomicity of a multi-line add** → if it turns out to
+  be guaranteed after all, the rollback becomes provably dead and should be
+  deleted, with this ADR superseded rather than quietly contradicted.
 - **The discount function ships** → it becomes the consumer of `_bundle_id`, and
   the property's format stops being an internal detail of the theme. That is the
   point at which its shape is worth pinning in `packages/shared`.
