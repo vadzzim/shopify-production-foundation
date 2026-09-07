@@ -13,6 +13,17 @@ running on a development store. Code written here is meant to be reused across
 projects, so it is held to production standards: no shortcuts that would have to
 be unwound later, and every non-obvious decision recorded in an ADR.
 
+## Repository state
+
+Implementation has not started. The repository currently holds documentation,
+architecture decisions and CI configuration only — there is no `package.json`,
+`theme/`, `apps/`, `packages/` or `prisma/` yet.
+
+Paths referenced in the rules below describe the **target structure** and are
+created as work proceeds. A rule pointing at a file that does not exist yet is a
+rule to apply once it does. **If a rule requires reading a file that is missing,
+say so instead of improvising** — a missing file is never a licence to guess.
+
 ## Stack
 
 - Theme: Liquid, Dawn-based, vanilla JS (web components). Do not add libraries.
@@ -24,9 +35,12 @@ be unwound later, and every non-obvious decision recorded in an ADR.
 
 ## Hard rules
 
-1. **API version.** Always use the current stable Admin API version defined in
-   `packages/shared/src/api-version.ts`. Never hardcode a version inline, and
-   never take one from model memory — verify it through the Shopify Dev MCP.
+1. **API version.** The Admin API version is a code-level compatibility
+   contract, not environment configuration: it lives in
+   `packages/shared/src/api-version.ts` (planned — see Repository state) and
+   nowhere else. Never hardcode it inline, never read it from an env var, and
+   never take it from model memory — confirm the current stable version through
+   the Shopify Dev MCP.
 2. **Always handle `userErrors`.** Any GraphQL mutation can return 200 and still
    not apply. Code that ignores `userErrors` does not pass review.
 3. **Webhooks.** Verify the HMAC against the raw `Buffer` before JSON parsing,
@@ -56,6 +70,10 @@ be unwound later, and every non-obvious decision recorded in an ADR.
 
 ## Commands
 
+Development happens on Windows. The examples below are POSIX shell (Git Bash);
+in PowerShell an environment variable is `$env:SHOPIFY_STORE`, not
+`$SHOPIFY_STORE`.
+
 ```bash
 pnpm install
 pnpm typecheck
@@ -65,7 +83,6 @@ pnpm --filter admin-app dev
 
 docker compose up -d          # local PostgreSQL
 pnpm prisma migrate dev
-pnpm prisma studio            # database GUI
 
 shopify theme dev --store $SHOPIFY_STORE
 shopify theme check --path theme
@@ -80,6 +97,9 @@ shopify theme push --unpublished   # stable preview URL for the theme
 - Any architectural choice: an ADR in `docs/adr/`.
 - The PR states what changed, why, and how it was verified, with a screenshot
   for UI changes.
+
+This list is authoritative. `docs/development.md` repeats it for human
+onboarding; if the two ever disagree, this one wins.
 
 ## Boundaries for AI agents
 

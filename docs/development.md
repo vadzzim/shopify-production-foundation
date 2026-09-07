@@ -8,6 +8,12 @@
 - Shopify CLI: `npm i -g @shopify/cli@latest`
 - A Shopify Partner account and a development store
 
+## Shell
+
+Development happens on Windows. Commands in this document are POSIX shell
+(Git Bash). In PowerShell, read environment variables as `$env:SHOPIFY_STORE`
+rather than `$SHOPIFY_STORE`; everything else is the same.
+
 ## Getting started
 
 ```bash
@@ -63,7 +69,12 @@ shopify theme push --unpublished    # stable preview URL for the theme
 - `pnpm typecheck && pnpm lint && pnpm test` all green.
 - Theme changes: `shopify theme check` clean, no Lighthouse regression.
 - New webhook handler: an HMAC test and an idempotency test.
-- Architectural choices recorded as an ADR in [`adr/`](adr/).
+- Any architectural choice: an ADR in [`adr/`](adr/).
+- The PR states what changed, why, and how it was verified, with a screenshot
+  for UI changes.
+
+Repeated here for onboarding. [`../CLAUDE.md`](../CLAUDE.md) holds the
+authoritative copy; if the two disagree, that one wins.
 
 ## Secrets
 

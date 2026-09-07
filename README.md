@@ -6,15 +6,19 @@
 >
 > **NORDLYS** is the reference implementation: a DTC skincare brand on a
 > development store, used to exercise the whole stack end to end. The brand and
-> the external ERP are stand-ins; the code, the architecture and the measurements
-> are real.
+> the external ERP are stand-ins; the architecture, the code and the measurements
+> are not.
+
+**Status: documentation and architecture decisions.** Implementation starts with
+Phase 1 of the [roadmap](docs/roadmap.md); the tables below carry per-item status
+so this page stays accurate as work lands rather than being rewritten later.
 
 **Live**
-- **Storefront:** <url> — development store password: `<password>`
-- **App:** video walkthrough <loom-url>. An embedded admin app cannot be opened
-  outside a store's admin, so it runs locally with a single command; deployment
-  topology and rationale are in [ADR-0008](docs/adr/0008-hosting-topology.md).
-  `Dockerfile` and `fly.toml` are in the repository.
+- **Storefront:** not yet published — will be a Shopify preview URL with the
+  development store password
+- **App:** an embedded admin app cannot be opened outside a store's admin, so it
+  runs locally and is demonstrated by video; deployment topology and rationale are
+  in [ADR-0008](docs/adr/0008-hosting-topology.md).
 - **Code:** this repository
 
 ---
@@ -39,12 +43,13 @@ project starts from a base instead of from Dawn plus improvisation.
 
 ## What is in it
 
-| Area | Contents |
-|---|---|
-| **Theme** (OS 2.0) | Dawn-based, custom sections with complete schemas, metaobject-driven content, bundle builder on the Ajax Cart API |
-| **App** | Embedded admin app: OAuth with offline and online tokens, Polaris UI, Admin GraphQL with cost-aware throttling and bulk operations |
-| **Integration** | HMAC-verified idempotent webhook intake, queue on a PostgreSQL table with backoff and a DLQ status, inventory sync |
-| **Quality** | Vitest + supertest, CI with theme-check, secret scanning and Lighthouse budgets, ADRs for every non-obvious decision |
+| Area | Contents | Status |
+|---|---|---|
+| **Theme** (OS 2.0) | Dawn-based, custom sections with complete schemas, metaobject-driven content, bundle builder on the Ajax Cart API | planned — Phase 1 |
+| **App** | Embedded admin app: OAuth with offline and online tokens, Polaris UI, Admin GraphQL with cost-aware throttling and bulk operations | planned — Phase 2 |
+| **Integration** | HMAC-verified idempotent webhook intake, queue on a PostgreSQL table with backoff and a DLQ status, inventory sync | planned — Phase 3 |
+| **Decisions** | ADRs for the stack, the database and ORM choice, and hosting topology | done |
+| **Quality** | CI with typecheck, lint, tests, theme-check, secret scanning and Lighthouse budgets | CI configured; tests follow the code |
 
 ## Architecture
 
@@ -64,7 +69,7 @@ flowchart LR
 ## Reference implementation
 
 NORDLYS exercises the base against a realistic set of requirements, so the
-foundation is proven rather than asserted:
+foundation ends up proven rather than asserted. The three it has to handle:
 
 1. **Custom routine sets.** Shopify has no native concept for them, so every set
    becomes a separate product — bloating the catalog and splitting inventory.
@@ -76,7 +81,8 @@ foundation is proven rather than asserted:
 
 ## Measured results
 
-Measured on the reference implementation. Methodology and full reports:
+No measurements yet — Phase 1 has not started. The methodology is fixed in
+advance so the numbers cannot be selected after the fact:
 [`docs/performance/`](docs/performance/).
 
 | Metric | Before | After |
@@ -89,6 +95,9 @@ Measured on the reference implementation. Methodology and full reports:
 
 ## Engineering notes
 
+Design decisions already made; each becomes a link to the implementing code as
+the phases land.
+
 - **Idempotent webhook handling.** Shopify guarantees at-least-once delivery, so
   duplicates are inevitable. Deduplication uses a unique index and
   `ON CONFLICT DO NOTHING` — not a `SELECT`-then-`INSERT` check, which is a race.
@@ -99,8 +108,16 @@ Measured on the reference implementation. Methodology and full reports:
 
 ## Using this as a project base
 
+What works today — local PostgreSQL, nothing else, since there is no application
+to start until Phase 2:
+
 ```bash
 docker compose up -d
+```
+
+From Phase 2 onward:
+
+```bash
 pnpm install
 cp .env.example .env
 pnpm prisma migrate dev
@@ -109,17 +126,19 @@ pnpm dev
 
 Already running PostgreSQL? Skip Docker and set `DATABASE_URL`.
 
-To start a client project from this base: replace the brand tokens and the
-sections under `theme/sections/`, keep the webhook intake, queue and Admin API
-layer as they are, and swap the NORDLYS metaobject definitions for the project's
-own content model. Conventions and hard rules are in [`CLAUDE.md`](CLAUDE.md);
-setup detail in [`docs/development.md`](docs/development.md).
+Conventions and hard rules that any code here must follow are in
+[`CLAUDE.md`](CLAUDE.md); setup detail in
+[`docs/development.md`](docs/development.md).
 
-## Status
+Once the phases land, starting a client project from this base means replacing
+the brand tokens and the sections under `theme/sections/`, keeping the webhook
+intake, queue and Admin API layer as they are, and swapping the NORDLYS
+metaobject definitions for the project's own content model.
 
-An early-stage foundation, not a finished product. What is deliberately designed
-but not yet built is recorded with its reasoning in the
-[roadmap](docs/roadmap.md):
+## Beyond the current roadmap
+
+Designed and reasoned about, but outside even the planned phases — recorded so
+the boundary is deliberate rather than accidental:
 
 - Shopify Function for bundle discounts.
 - Checkout UI extension.
@@ -147,4 +166,5 @@ model mistakes caught in review are documented in
 - The storefront is always password-protected; that is a platform constraint,
   not a setting.
 - Real payments are not possible; test orders go through the Bogus Gateway.
-- The theme is published as a preview on Shopify's CDN: stable URL, always available.
+- The theme will be published as a preview on Shopify's CDN: stable URL, always
+  available, no hosting cost.

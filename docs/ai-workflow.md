@@ -7,13 +7,13 @@
 
 ## 1. Tools and roles
 
-| Tool | Role |
-|---|---|
-| Claude Code | primary agent: implementation, refactoring, tests |
-| Shopify Dev MCP | current Admin/Storefront API schemas instead of model memory |
-| Custom MCP for `mock-erp` | lets the agent read the real integration contracts |
-| `.claude/skills/*` | domain review checklists (below) |
-| CI review loop | tests plus automated review, posted as a PR comment |
+| Tool | Role | Status |
+|---|---|---|
+| Claude Code | primary agent: implementation, refactoring, tests | in use |
+| Shopify Dev MCP | current Admin/Storefront API schemas instead of model memory | in use |
+| `.claude/skills/*` | domain review checklists (below) | planned |
+| CI review loop | tests plus automated review, posted as a PR comment | planned |
+| Custom MCP for `mock-erp` | lets the agent read the real integration contracts | roadmap v2 |
 
 **Why the Dev MCP is mandatory.** Shopify versions the Admin API quarterly. From
 memory, a model will confidently produce mutations and fields that do not exist
@@ -21,7 +21,11 @@ in the current version, or that were renamed. The MCP eliminates an entire class
 of errors that would otherwise only surface at runtime. It is the first thing set
 up in the project, before any code is written.
 
-## 2. Custom skills
+## 2. Custom skills (planned)
+
+`.claude/skills/` is empty at the time of writing. Three skills are specified
+below and are built alongside the code they check — a review checklist written
+before there is anything to review would only encode guesses.
 
 - **`shopify-graphql-review`** — checks whether `userErrors` are handled, whether
   `throttleStatus` is respected, whether a pagination loop is used where a bulk
@@ -31,7 +35,7 @@ up in the project, before any code is written.
 - **`liquid-a11y-audit`** — per section: keyboard navigation, `aria-live` on async
   updates, focus management, reserved dimensions for media.
 
-Skills live in `.claude/skills/` and run before every PR. The point is not
+Skills will live in `.claude/skills/` and run before every PR. The point is not
 automation for its own sake: these domain errors recur, and checking for them by
 hand every time is how they get missed.
 
@@ -103,7 +107,9 @@ In practice: every fragment is checked for secrets and PII before it goes into a
 prompt. CI runs a secret scan (gitleaks). `.gitignore` covers `.env*`, dumps and logs.
 
 Permitted tools are recorded explicitly; using a new service that receives code
-requires client approval first.
+requires client approval first. The same constraint appears as a hard rule for
+agents in [`../CLAUDE.md`](../CLAUDE.md) under "Boundaries for AI agents"; this
+section is the reasoning behind it.
 
 ## 7. Where AI is not relied on
 
@@ -120,7 +126,10 @@ Where I do not rely on an agent:
 - **security and data handling** — the cost of an error is asymmetric, so it gets
   a manual check.
 
-## 8. Metrics (to be completed)
+## 8. Metrics
+
+Empty until there is code to measure. Filled in from actual review outcomes, not
+estimated.
 
 | | |
 |---|---|
