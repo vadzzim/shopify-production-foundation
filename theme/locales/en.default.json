@@ -283,6 +283,7 @@
         "incomplete": "Pick one product for every step to complete the routine.",
         "unavailable": "One of the products in this routine has just sold out, so nothing was added to your cart. Pick another one and try again.",
         "variant_missing": "One of the products in this routine is no longer for sale, so nothing was added to your cart. Reload the page to see what is available.",
+        "stock_claimed": "Your cart already holds all the stock we have of one of these products, so the routine was not added. Remove it from your cart, or pick another product.",
         "network": "We could not reach the store, so your cart has not changed. Check your connection and try again.",
         "generic": "This routine could not be added to your cart, and your cart has not changed. Please try again.",
         "step_sold_out": "Every product in one of the steps is sold out, so this routine cannot be built right now."

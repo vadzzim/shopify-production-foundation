@@ -72,11 +72,11 @@ if (!customElements.get('bundle-builder')) {
 
           const body = await response.json().catch(() => null);
 
-          // A cart error arrives as HTTP 422 or 404 with a `status` field in
-          // the body, not as a rejected promise.
+          // A cart error arrives as HTTP 422 with a `status` field in the body,
+          // not as a rejected promise.
           if (!response.ok || body === null || body.status) {
             await this.discardBundle(bundleId);
-            this.showApiError(response.status, body);
+            await this.reportFailure(response.status, body, selection);
             return;
           }
 
@@ -91,12 +91,14 @@ if (!customElements.get('bundle-builder')) {
       }
 
       /*
-       * A bundle that half lands is a broken cart: the customer pays for two
-       * thirds of a routine and the bundle discount does not apply. Shopify
-       * does not document whether a multi-line `/cart/add.js` call is atomic,
-       * so the theme enforces all-or-nothing itself and removes any line item
-       * carrying this bundle id after a failure. When the rejection was atomic
-       * nothing matches, and this costs one request on the error path only.
+       * A bundle that half lands is a broken cart: the customer pays for part
+       * of a routine and the bundle discount does not apply. A multi-line
+       * `/cart/add.js` call is not atomic — measured against this store, a line
+       * asking for more than the available stock came back 422 while the other
+       * line of the same request was added — so the theme enforces
+       * all-or-nothing itself and removes every line item carrying this bundle
+       * id after a failure. The bundle id is generated per click, so this can
+       * never touch a line the customer added earlier.
        */
       async discardBundle(bundleId) {
         try {
@@ -181,21 +183,55 @@ if (!customElements.get('bundle-builder')) {
         if (this.cartLink) this.cartLink.hidden = false;
       }
 
-      showApiError(httpStatus, body) {
+      async reportFailure(httpStatus, body, selection) {
         const status = (body && body.status) || httpStatus;
 
-        if (status === 404) {
-          this.showError(this.strings.variant_missing);
-        } else if (status === 422) {
-          this.showError(this.strings.unavailable);
-        } else {
-          this.showError(this.strings.generic);
-        }
+        // Everything the cart refuses arrives as 422, including "Cannot find
+        // variant", so the status alone does not say which case it is.
+        const reason = status === 422 || status === 404 ? await this.classifyFailure(selection) : 'generic';
+
+        this.showError(this.strings[reason] || this.strings.generic);
 
         // Shopify's own description names the product that failed, which the
         // translated sentence cannot. It is shown as a second line, not instead
         // of it.
         this.setDetail(body && body.description);
+      }
+
+      /*
+       * Which of the three failures it was is decided by asking the source of
+       * truth about the chosen variants, not by matching words in Shopify's
+       * description: that sentence is written in the shop's language and is not
+       * a contract. The product JSON says whether the variant still exists at
+       * all (it was unpublished or deleted) or exists and is out of stock.
+       */
+      async classifyFailure(selection) {
+        for (const step of selection) {
+          const handle = step.input.dataset.productHandle;
+          const variantId = Number(step.input.value);
+          if (!handle) continue;
+
+          try {
+            const response = await fetch(`${this.root}products/${handle}.js`, {
+              headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) return 'variant_missing';
+
+            const product = await response.json();
+            const variant = (product.variants || []).find((candidate) => candidate.id === variantId);
+
+            if (!variant) return 'variant_missing';
+            if (!variant.available) return 'unavailable';
+          } catch (error) {
+            return 'generic';
+          }
+        }
+
+        // Every chosen variant exists and is in stock, and the cart still
+        // refused the line: what is left is stock already claimed by this
+        // cart — Shopify's "You can't add more" and "Only N items were added"
+        // family of errors.
+        return 'stock_claimed';
       }
 
       showError(text) {
