@@ -70,6 +70,7 @@
           type="radio"
           name="{{ group_name }}"
           value="{{ step_variant.id }}"
+          data-product-handle="{{ step_product.handle }}"
           {% unless is_available %}
             disabled
           {% endunless %}
