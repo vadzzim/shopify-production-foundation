@@ -16,7 +16,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done
 Custom routine sets and product page performance.
 
 - [ ] Dawn-based theme, Online Store 2.0 structure
-- [~] Metaobject `ingredient` plus metafields `custom.ingredients`,
+- [x] Metaobject `ingredient` plus metafields `custom.ingredients`,
       `custom.routine_step` — see [ADR-0003](adr/0003-metaobjects-for-ingredients.md)
 - [ ] `ingredient-highlights` section — complete schema (`settings`, `blocks`,
       `presets`), assemblable by a merchant in the theme editor without code changes
