@@ -22,3 +22,4 @@ in showing which alternatives were on the table and what was known at the time.
 | [0010](0010-section-composition-field-blocks.md) | Section blocks are the card's fields, not the ingredients | accepted |
 | [0011](0011-dawn-over-skeleton-theme.md) | Dawn over the Skeleton theme as the base for stage 1 | accepted |
 | [0012](0012-bundle-add-to-cart-transaction.md) | One Ajax add for a bundle, all-or-nothing enforced by the theme | accepted |
+| [0013](0013-reveal-on-scroll-animations-off.md) | Reveal-on-scroll animations off by default | accepted |
