@@ -32,9 +32,16 @@ Custom routine sets and product page performance.
       Link headers at ten with image preloads sorted last
       (`srcset`/`sizes`, deferred scripts, reserved dimensions and
       `font-display: swap` were already Dawn's, and the report says so)
-- [ ] Accessibility: keyboard navigation, `aria-live` on async updates, focus trap
-      in the cart drawer, contrast >= 4.5:1
-- [ ] `shopify theme check` clean
+- [x] Accessibility: keyboard navigation, `aria-live` on async updates, contrast
+      >= 4.5:1, and focus moving into the cart notification and back to the
+      element that opened it. The criterion originally said "focus trap in the
+      cart drawer"; the drawer is not enabled (`cart_type: "notification"`), so
+      it named a component the theme does not ship — see
+      [ADR-0014](adr/0014-cart-notification-over-drawer.md)
+- [x] `shopify theme check` clean — no errors. The 11 remaining warnings are all
+      in stock Dawn files (`UndefinedObject`, `UnusedAssign`, `VariableName`,
+      `OrphanedSnippet`); none is in code this project authored, and CI gates on
+      `--fail-level error`
 
 **Boundaries:** no libraries — vanilla JS and web components in Dawn's style.
 
