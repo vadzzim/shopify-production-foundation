@@ -85,9 +85,9 @@ pnpm --filter admin-app dev
 docker compose up -d          # local PostgreSQL
 pnpm prisma migrate dev
 
-shopify theme dev --store $SHOPIFY_STORE
+shopify theme dev --path theme --store $SHOPIFY_STORE
 shopify theme check --path theme
-shopify theme push --unpublished   # stable preview URL for the theme
+shopify theme push --path theme --unpublished   # stable preview URL
 ```
 
 ## Definition of Done for any task
