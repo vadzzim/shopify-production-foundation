@@ -21,10 +21,11 @@ Custom routine sets and product page performance.
 - [x] `ingredient-highlights` section — complete schema (`settings`, `blocks`,
       `presets`), assemblable by a merchant in the theme editor without code
       changes — see [ADR-0010](adr/0010-section-composition-field-blocks.md)
-- [ ] `bundle-builder` section — pick three products by routine step, add to cart
+- [x] `bundle-builder` section — pick three products by routine step, add to cart
       in a single `/cart/add.js` request, line items linked by the `_bundle_id`
-      line item property
-- [ ] Cart edge cases handled: sold out, variant unavailable, network failure
+      line item property — see
+      [ADR-0012](adr/0012-bundle-add-to-cart-transaction.md)
+- [x] Cart edge cases handled: sold out, variant unavailable, network failure
 - [ ] Performance: preload the LCP image, correct `srcset`/`sizes`, deferred
       scripts, reserved dimensions for media, `font-display: swap`
 - [ ] Accessibility: keyboard navigation, `aria-live` on async updates, focus trap
