@@ -1,0 +1,39 @@
+.ingredient-highlights .title {
+  margin: 0;
+}
+
+.ingredient-highlights .title-wrapper {
+  margin-bottom: 3rem;
+}
+
+.ingredient-highlights__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ingredient-card__media {
+  margin-bottom: 1.5rem;
+}
+
+.ingredient-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ingredient-card__name {
+  margin: 0 0 0.6rem;
+}
+
+.ingredient-card__benefit {
+  margin: 0 0 1rem;
+  font-size: 1.3rem;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+  color: rgba(var(--color-foreground), 0.75);
+}
+
+.ingredient-card__description {
+  margin: 0;
+}

@@ -1,0 +1,303 @@
+{{ 'section-ingredient-highlights.css' | asset_url | stylesheet_tag }}
+
+{%- liquid
+  assign ingredients = section.settings.ingredients
+  if ingredients == blank
+    assign ingredients = product.metafields.custom.ingredients.value
+  endif
+
+  assign renderable_count = 0
+  for ingredient in ingredients
+    if ingredient != blank
+      if ingredient.name.value != blank
+        assign renderable_count = renderable_count | plus: 1
+      endif
+    endif
+  endfor
+
+  assign name_shown = false
+  for block in section.blocks
+    if block.type == 'name'
+      assign name_shown = true
+    endif
+  endfor
+
+  assign columns_desktop = section.settings.columns_desktop
+  assign columns_mobile = section.settings.columns_mobile | plus: 0
+-%}
+
+{%- comment -%}
+  Three states render nothing at all, rather than an empty grid or a stranded
+  heading: the product carries no `custom.ingredients` metafield, the list is
+  empty, or every reference in it points at a deleted entry. ADR-0003 requires
+  all three to be silent, so the guard counts resolvable entries before any
+  markup is emitted.
+{%- endcomment -%}
+{%- if renderable_count > 0 -%}
+  {%- style -%}
+    .section-{{ section.id }}-padding {
+      padding-top: {{ section.settings.padding_top | times: 0.75 | round: 0 }}px;
+      padding-bottom: {{ section.settings.padding_bottom | times: 0.75 | round: 0 }}px;
+    }
+
+    @media screen and (min-width: 750px) {
+      .section-{{ section.id }}-padding {
+        padding-top: {{ section.settings.padding_top }}px;
+        padding-bottom: {{ section.settings.padding_bottom }}px;
+      }
+    }
+  {%- endstyle -%}
+
+  {%- liquid
+    assign grid_space_desktop = columns_desktop | minus: 1 | times: settings.spacing_grid_horizontal | plus: 100 | append: 'px'
+    assign grid_space_tablet = columns_mobile | minus: 1 | times: settings.spacing_grid_horizontal | plus: 100 | append: 'px'
+    assign grid_space_mobile = columns_mobile | minus: 1 | times: settings.spacing_grid_horizontal | divided_by: 2 | plus: 30 | append: 'px'
+  -%}
+  {%- capture image_sizes -%}
+    (min-width: {{ settings.page_width }}px) calc(({{ settings.page_width }}px - {{ grid_space_desktop }}) / {{ columns_desktop }}), (min-width: 990px) calc((100vw - {{ grid_space_desktop }}) / {{ columns_desktop }}), (min-width: 750px) calc((100vw - {{ grid_space_tablet }}) / {{ columns_mobile }}), calc((100vw - {{ grid_space_mobile }}) / {{ columns_mobile }})
+  {%- endcapture -%}
+
+  <div class="ingredient-highlights color-{{ section.settings.color_scheme }} gradient">
+    <div class="page-width section-{{ section.id }}-padding isolate">
+      {%- unless section.settings.heading == blank -%}
+        <div class="title-wrapper title-wrapper--no-top-margin{% if section.settings.column_alignment == 'center' %} center{% endif %}">
+          <h2 class="title inline-richtext {{ section.settings.heading_size }}">
+            {{ section.settings.heading }}
+          </h2>
+        </div>
+      {%- endunless -%}
+
+      <ul
+        class="ingredient-highlights__list grid grid--{{ columns_mobile }}-col-tablet-down grid--{{ columns_desktop }}-col-desktop"
+        role="list"
+      >
+        {%- assign rendered = 0 -%}
+        {%- for ingredient in ingredients -%}
+          {%- if ingredient == blank -%}
+            {%- continue -%}
+          {%- endif -%}
+          {%- if ingredient.name.value == blank -%}
+            {%- continue -%}
+          {%- endif -%}
+          {%- assign rendered = rendered | plus: 1 -%}
+
+          <li class="grid__item{% if section.settings.column_alignment == 'center' %} center{% endif %}">
+            {%- render 'ingredient-card',
+              ingredient: ingredient,
+              blocks: section.blocks,
+              image_ratio: section.settings.image_ratio,
+              image_sizes: image_sizes,
+              name_shown: name_shown,
+              card_index: rendered
+            -%}
+          </li>
+        {%- endfor -%}
+      </ul>
+    </div>
+  </div>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "t:sections.ingredient-highlights.name",
+  "tag": "section",
+  "class": "section",
+  "disabled_on": {
+    "groups": ["header", "footer"]
+  },
+  "settings": [
+    {
+      "type": "inline_richtext",
+      "id": "heading",
+      "default": "t:sections.ingredient-highlights.settings.heading.default",
+      "label": "t:sections.ingredient-highlights.settings.heading.label"
+    },
+    {
+      "type": "select",
+      "id": "heading_size",
+      "options": [
+        {
+          "value": "h2",
+          "label": "t:sections.all.heading_size.options__1.label"
+        },
+        {
+          "value": "h1",
+          "label": "t:sections.all.heading_size.options__2.label"
+        },
+        {
+          "value": "h0",
+          "label": "t:sections.all.heading_size.options__3.label"
+        }
+      ],
+      "default": "h2",
+      "label": "t:sections.all.heading_size.label"
+    },
+    {
+      "type": "header",
+      "content": "t:sections.ingredient-highlights.settings.header_content.content",
+      "info": "t:sections.ingredient-highlights.settings.header_content.info"
+    },
+    {
+      "type": "metaobject_list",
+      "id": "ingredients",
+      "metaobject_type": "ingredient",
+      "limit": 12,
+      "label": "t:sections.ingredient-highlights.settings.ingredients.label",
+      "info": "t:sections.ingredient-highlights.settings.ingredients.info"
+    },
+    {
+      "type": "header",
+      "content": "t:sections.ingredient-highlights.settings.header_layout.content"
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 3,
+      "label": "t:sections.ingredient-highlights.settings.columns_desktop.label"
+    },
+    {
+      "type": "select",
+      "id": "columns_mobile",
+      "options": [
+        {
+          "value": "1",
+          "label": "t:sections.ingredient-highlights.settings.columns_mobile.options__1.label"
+        },
+        {
+          "value": "2",
+          "label": "t:sections.ingredient-highlights.settings.columns_mobile.options__2.label"
+        }
+      ],
+      "default": "1",
+      "label": "t:sections.ingredient-highlights.settings.columns_mobile.label"
+    },
+    {
+      "type": "select",
+      "id": "image_ratio",
+      "options": [
+        {
+          "value": "square",
+          "label": "t:sections.ingredient-highlights.settings.image_ratio.options__1.label"
+        },
+        {
+          "value": "portrait",
+          "label": "t:sections.ingredient-highlights.settings.image_ratio.options__2.label"
+        },
+        {
+          "value": "landscape",
+          "label": "t:sections.ingredient-highlights.settings.image_ratio.options__3.label"
+        },
+        {
+          "value": "circle",
+          "label": "t:sections.ingredient-highlights.settings.image_ratio.options__4.label"
+        }
+      ],
+      "default": "square",
+      "label": "t:sections.ingredient-highlights.settings.image_ratio.label"
+    },
+    {
+      "type": "select",
+      "id": "column_alignment",
+      "options": [
+        {
+          "value": "left",
+          "label": "t:sections.ingredient-highlights.settings.column_alignment.options__1.label"
+        },
+        {
+          "value": "center",
+          "label": "t:sections.ingredient-highlights.settings.column_alignment.options__2.label"
+        }
+      ],
+      "default": "left",
+      "label": "t:sections.ingredient-highlights.settings.column_alignment.label"
+    },
+    {
+      "type": "color_scheme",
+      "id": "color_scheme",
+      "label": "t:sections.all.colors.label",
+      "default": "scheme-1"
+    },
+    {
+      "type": "header",
+      "content": "t:sections.all.padding.section_padding_heading"
+    },
+    {
+      "type": "range",
+      "id": "padding_top",
+      "min": 0,
+      "max": 100,
+      "step": 4,
+      "unit": "px",
+      "label": "t:sections.all.padding.padding_top",
+      "default": 36
+    },
+    {
+      "type": "range",
+      "id": "padding_bottom",
+      "min": 0,
+      "max": 100,
+      "step": 4,
+      "unit": "px",
+      "label": "t:sections.all.padding.padding_bottom",
+      "default": 36
+    }
+  ],
+  "max_blocks": 4,
+  "blocks": [
+    {
+      "type": "image",
+      "name": "t:sections.ingredient-highlights.blocks.image.name",
+      "limit": 1
+    },
+    {
+      "type": "name",
+      "name": "t:sections.ingredient-highlights.blocks.name.name",
+      "limit": 1
+    },
+    {
+      "type": "benefit",
+      "name": "t:sections.ingredient-highlights.blocks.benefit.name",
+      "limit": 1
+    },
+    {
+      "type": "description",
+      "name": "t:sections.ingredient-highlights.blocks.description.name",
+      "limit": 1,
+      "settings": [
+        {
+          "type": "range",
+          "id": "truncate_words",
+          "min": 0,
+          "max": 60,
+          "step": 5,
+          "default": 0,
+          "label": "t:sections.ingredient-highlights.blocks.description.settings.truncate_words.label",
+          "info": "t:sections.ingredient-highlights.blocks.description.settings.truncate_words.info"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "t:sections.ingredient-highlights.presets.name",
+      "blocks": [
+        {
+          "type": "image"
+        },
+        {
+          "type": "name"
+        },
+        {
+          "type": "benefit"
+        },
+        {
+          "type": "description"
+        }
+      ]
+    }
+  ]
+}
+{% endschema %}

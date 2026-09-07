@@ -375,6 +375,85 @@
     }
   },
   "sections": {
+    "ingredient-highlights": {
+      "name": "Ingredient highlights",
+      "presets": {
+        "name": "Ingredient highlights"
+      },
+      "settings": {
+        "heading": {
+          "label": "Heading",
+          "default": "What's inside"
+        },
+        "header_content": {
+          "content": "Content",
+          "info": "The section reads the product's Ingredients metafield. Pick entries below only to override that, or to use the section outside a product page."
+        },
+        "ingredients": {
+          "label": "Ingredients",
+          "info": "Leave empty to show the ingredients of the current product."
+        },
+        "header_layout": {
+          "content": "Layout"
+        },
+        "columns_desktop": {
+          "label": "Columns on desktop"
+        },
+        "columns_mobile": {
+          "label": "Columns on mobile",
+          "options__1": {
+            "label": "1 column"
+          },
+          "options__2": {
+            "label": "2 columns"
+          }
+        },
+        "image_ratio": {
+          "label": "Image ratio",
+          "options__1": {
+            "label": "Square"
+          },
+          "options__2": {
+            "label": "Portrait"
+          },
+          "options__3": {
+            "label": "Landscape"
+          },
+          "options__4": {
+            "label": "Circle"
+          }
+        },
+        "column_alignment": {
+          "label": "Column alignment",
+          "options__1": {
+            "label": "Left"
+          },
+          "options__2": {
+            "label": "Center"
+          }
+        }
+      },
+      "blocks": {
+        "image": {
+          "name": "Image"
+        },
+        "name": {
+          "name": "Name"
+        },
+        "benefit": {
+          "name": "Benefit"
+        },
+        "description": {
+          "name": "Description",
+          "settings": {
+            "truncate_words": {
+              "label": "Truncate after",
+              "info": "Words. Set to 0 to show the full description."
+            }
+          }
+        }
+      }
+    },
     "all": {
       "animation": {
         "content": "Animations",
