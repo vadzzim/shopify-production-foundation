@@ -1,0 +1,98 @@
+{
+  "capturedOn": "2026-09-08",
+  "tool": "axe-core 4.10.2",
+  "tags": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"],
+  "target": "unpublished preview theme 192916521282 on the Shopify CDN",
+  "themeState": "feat/performance, reveal-on-scroll animations off",
+  "notes": [
+    "#PBarNextFrame is Shopify's own preview-bar iframe. It is injected only because the theme under test is unpublished and does not exist on a published theme. It is listed for completeness and is not a defect in this theme.",
+    "An earlier run against the same pages with reveal-on-scroll animations ON reported nine additional color-contrast violations of impact 'serious' in the footer (#fdfdfd on #ffffff, 1.01:1). Those were not real: the elements still carried scroll-trigger--offscreen, so Dawn's animation held them at opacity 0.01 and axe measured the blended colour. They disappear either by scrolling the footer into view before auditing, or by turning the animations off, which is what this theme state does.",
+    "The cart was audited twice: empty, and with two line items added through /cart/add.js, because an empty cart renders none of the line-item markup."
+  ],
+  "pages": [
+    {
+      "page": "home",
+      "url": "https://ecorn-oj1cb5ll.myshopify.com/",
+      "passes": 48,
+      "violations": [
+        {
+          "id": "frame-title",
+          "impact": "serious",
+          "help": "Frames must have an accessible name",
+          "nodes": 1,
+          "targets": ["#PBarNextFrame"],
+          "ours": false
+        }
+      ],
+      "incomplete": [
+        { "id": "color-contrast", "nodes": 3 },
+        { "id": "frame-tested", "nodes": 1 }
+      ]
+    },
+    {
+      "page": "product",
+      "url": "https://ecorn-oj1cb5ll.myshopify.com/products/fjord-cleansing-balm",
+      "passes": 48,
+      "violations": [
+        {
+          "id": "label",
+          "impact": "critical",
+          "help": "Form elements must have labels",
+          "nodes": 1,
+          "targets": ["#Quantity-template--28653730693442__main"],
+          "ours": true,
+          "cause": "Every text node inside the <label> in main-product.liquid is aria-hidden=\"true\", and the name is supplied by aria-labelledby on the <label> itself. When an input's accessible name is computed from its label, the algorithm walks the label's subtree - skipping aria-hidden nodes - and does not consult aria-labelledby on the label. The label contributes nothing and the input ends up unnamed.",
+          "status": "fixed on feat/a11y"
+        },
+        {
+          "id": "frame-title",
+          "impact": "serious",
+          "help": "Frames must have an accessible name",
+          "nodes": 1,
+          "targets": ["#PBarNextFrame"],
+          "ours": false
+        }
+      ],
+      "incomplete": [
+        { "id": "color-contrast", "nodes": 1 },
+        { "id": "frame-tested", "nodes": 1 }
+      ]
+    },
+    {
+      "page": "cart (empty)",
+      "url": "https://ecorn-oj1cb5ll.myshopify.com/cart",
+      "passes": 46,
+      "violations": [
+        {
+          "id": "frame-title",
+          "impact": "serious",
+          "help": "Frames must have an accessible name",
+          "nodes": 1,
+          "targets": ["#PBarNextFrame"],
+          "ours": false
+        }
+      ],
+      "incomplete": [{ "id": "frame-tested", "nodes": 1 }]
+    },
+    {
+      "page": "cart (2 line items)",
+      "url": "https://ecorn-oj1cb5ll.myshopify.com/cart",
+      "lineItems": 2,
+      "passes": 52,
+      "violations": [
+        {
+          "id": "frame-title",
+          "impact": "serious",
+          "help": "Frames must have an accessible name",
+          "nodes": 1,
+          "targets": ["#PBarNextFrame"],
+          "ours": false
+        }
+      ],
+      "incomplete": [
+        { "id": "color-contrast", "nodes": 6 },
+        { "id": "frame-tested", "nodes": 1 }
+      ]
+    }
+  ]
+}

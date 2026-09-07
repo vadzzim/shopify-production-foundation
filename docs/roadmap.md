@@ -26,8 +26,12 @@ Custom routine sets and product page performance.
       line item property — see
       [ADR-0012](adr/0012-bundle-add-to-cart-transaction.md)
 - [x] Cart edge cases handled: sold out, variant unavailable, network failure
-- [ ] Performance: preload the LCP image, correct `srcset`/`sizes`, deferred
-      scripts, reserved dimensions for media, `font-display: swap`
+- [x] Performance: measured before/after per optimisation — see
+      [`docs/performance/`](performance/). Preloading the LCP image turned out
+      not to apply: the home page LCP element is text, and Shopify caps preload
+      Link headers at ten with image preloads sorted last
+      (`srcset`/`sizes`, deferred scripts, reserved dimensions and
+      `font-display: swap` were already Dawn's, and the report says so)
 - [ ] Accessibility: keyboard navigation, `aria-live` on async updates, focus trap
       in the cart drawer, contrast >= 4.5:1
 - [ ] `shopify theme check` clean
