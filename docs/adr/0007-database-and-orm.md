@@ -1,7 +1,7 @@
 # ADR-0007: PostgreSQL + Prisma, queue on a table
 
 - **Status:** accepted
-- **Date:** <fill in>
+- **Date:** 2026-09-07
 
 ## Context
 

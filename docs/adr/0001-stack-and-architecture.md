@@ -1,7 +1,7 @@
 # ADR-0001: Stack and overall architecture
 
 - **Status:** accepted
-- **Date:** <fill in>
+- **Date:** 2026-09-07
 
 ## Context
 

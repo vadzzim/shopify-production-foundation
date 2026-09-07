@@ -1,7 +1,7 @@
 # ADR-0008: Hosting and deployment topology
 
 - **Status:** accepted
-- **Date:** <fill in>
+- **Date:** 2026-09-07
 
 ## Context
 
