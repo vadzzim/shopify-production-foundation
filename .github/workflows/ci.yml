@@ -96,8 +96,19 @@ jobs:
       # to vitest, which reads both tokens as test-name filters and produces no
       # coverage at all — quietly, with a green run. Hence a named script.
       - run: pnpm test:coverage
+      # The coverage report is diagnostics a human opens by hand, not a check:
+      # this step cannot fail in a way that means "the code is wrong". Letting
+      # it fail the job put GitHub's artifact service in the merge gate, and on
+      # 2026-09-08 that service returned a 403 from FinalizeArtifact and turned
+      # a docs-only commit red with typecheck, lint and test all green.
+      #
+      # The cost is that a `coverage/` that stops being produced at all now goes
+      # unnoticed until someone goes looking for the report. Accepted: the
+      # `test:coverage` step above still fails loudly if the run itself breaks,
+      # and this one is a convenience on top of it.
       - uses: actions/upload-artifact@v7
         if: always()
+        continue-on-error: true
         with:
           name: coverage
           path: coverage/
