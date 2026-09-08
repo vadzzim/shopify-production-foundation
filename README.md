@@ -79,6 +79,31 @@ foundation ends up proven rather than asserted. The three it has to handle:
 3. **Inventory drift** between Shopify and an external system. Handled by
    idempotent webhook intake and a queue with retries.
 
+### Storefront walkthrough
+
+What to look at, and in what order, on the home page:
+
+1. **Build your routine** — the bundle builder, and the one place where the
+   interaction is not what it looks like. Each step shows product cards, but
+   they are choices, not links: a card is a `<label>` wrapping
+   `<input type="radio">`, so the browser enforces "exactly one per step" and
+   supplies the keyboard handling and the group name. Click one card in each of
+   the three steps — the picked card gains a border and a **Selected** badge —
+   and **Add routine to cart** enables. It adds all three products in a single
+   `/cart/add.js` request, all-or-nothing, with the lines linked by a
+   `_bundle_id` property. Reasoning, and the four rejected alternatives, in
+   [ADR-0012](docs/adr/0012-bundle-add-to-cart-transaction.md).
+2. **A product page** — reached from **Catalog** or from the product grids,
+   where cards *are* links. Ingredients come from metaobjects rather than
+   duplicated metafields ([ADR-0003](docs/adr/0003-metaobjects-for-ingredients.md));
+   the measured LCP and Speed Index gains below are on this page's template
+   and the home page.
+3. **The cart** — a cart notification rather than a drawer, and why, in
+   [ADR-0014](docs/adr/0014-cart-notification-over-drawer.md).
+
+Every custom section carries a complete schema with `presets`, so all of the
+above is configurable in the theme editor without touching code.
+
 ## Measured results
 
 Home page, mobile, median of five runs against the real CDN with Shopify's

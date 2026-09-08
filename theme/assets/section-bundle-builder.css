@@ -52,6 +52,16 @@
   }
 }
 
+/*
+ * The instruction line. It sits below the heading and above the steps because
+ * it has to be read before the first card is looked at: the cards are choices,
+ * and nothing about a card carrying an image, a title and a price says so.
+ */
+.bundle-builder__hint {
+  font-size: 1.4rem;
+  margin: 0;
+}
+
 .bundle-builder__steps {
   display: grid;
   gap: 2.8rem;
@@ -164,6 +174,38 @@
   height: 100%;
   object-fit: cover;
   width: 100%;
+}
+
+/*
+ * The selection badge. The border alone carries the state at a glance too
+ * weakly — a card that looks like every product card on the page reads as a
+ * link, and a 1px border change does not correct that impression; a word does.
+ *
+ * Outlined rather than filled, matching `__step-number`: a filled pill needs
+ * the page's background colour for its text, and this file deliberately
+ * derives every colour from `currentColor` so the section survives being
+ * copied to another base theme.
+ *
+ * In the card's flow rather than overlaid on the image, and hidden with
+ * `visibility` rather than `display`: an outlined pill over an arbitrary
+ * product photograph has no contrast floor, while the card's own background
+ * does. Reserving the row keeps every card the same height and stops the grid
+ * from moving when a choice is made.
+ */
+.bundle-builder__option-selected {
+  border: 0.1rem solid currentColor;
+  border-radius: 10rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  justify-self: start;
+  letter-spacing: 0.06rem;
+  padding: 0.2rem 0.9rem;
+  text-transform: uppercase;
+  visibility: hidden;
+}
+
+.bundle-builder__option:has(input:checked) .bundle-builder__option-selected {
+  visibility: visible;
 }
 
 .bundle-builder__option-title {

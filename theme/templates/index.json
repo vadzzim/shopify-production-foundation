@@ -72,6 +72,7 @@
       "settings": {
         "heading": "Build your routine",
         "heading_size": "large",
+        "hint": "Pick one product for each step — the whole routine goes into your cart at once.",
         "button_label": "Add routine to cart",
         "products_per_step": 4,
         "show_price": true,

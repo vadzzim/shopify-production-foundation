@@ -397,6 +397,11 @@
             "label": "Extra large"
           }
         },
+        "hint": {
+          "label": "Instruction line",
+          "default": "Pick one product for each step — the whole routine goes into your cart at once.",
+          "info": "Tells the customer that the cards are choices, not links. Leave empty to hide it."
+        },
         "button_label": {
           "label": "Button label",
           "default": "Add routine to cart"

@@ -64,13 +64,31 @@
 
   <div class="bundle-builder color-{{ section.settings.color_scheme }} gradient">
     <div class="page-width section-{{ section.id }}-padding">
-      {%- unless section.settings.heading == blank -%}
+      {%- comment -%}
+        The hint is gated on there being steps to pick from: an instruction to
+        choose one product per step is noise above a section that is telling the
+        merchant it has no steps configured.
+      {%- endcomment -%}
+      {%- liquid
+        assign show_hint = false
+        if section.settings.hint != blank and step_count > 0
+          assign show_hint = true
+        endif
+      -%}
+
+      {%- if section.settings.heading != blank or show_hint -%}
         <div class="bundle-builder__intro">
-          <h2 class="bundle-builder__heading bundle-builder__heading--{{ section.settings.heading_size }}">
-            {{ section.settings.heading }}
-          </h2>
+          {%- unless section.settings.heading == blank -%}
+            <h2 class="bundle-builder__heading bundle-builder__heading--{{ section.settings.heading_size }}">
+              {{ section.settings.heading }}
+            </h2>
+          {%- endunless -%}
+
+          {%- if show_hint -%}
+            <p class="bundle-builder__hint">{{ section.settings.hint }}</p>
+          {%- endif -%}
         </div>
-      {%- endunless -%}
+      {%- endif -%}
 
       {%- if step_count == 0 -%}
         <p class="bundle-builder__unbuildable">{{ 'sections.bundle_builder.editor_no_steps' | t }}</p>
@@ -200,6 +218,13 @@
       ],
       "default": "medium",
       "label": "t:sections.bundle-builder.settings.heading_size.label"
+    },
+    {
+      "type": "inline_richtext",
+      "id": "hint",
+      "default": "t:sections.bundle-builder.settings.hint.default",
+      "label": "t:sections.bundle-builder.settings.hint.label",
+      "info": "t:sections.bundle-builder.settings.hint.info"
     },
     {
       "type": "text",
