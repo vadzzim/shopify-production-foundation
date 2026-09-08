@@ -3,7 +3,11 @@ import {
   ROUTINE_STEPS,
   type Bundle,
   type BundleItem,
+  type BundleItemInput,
   type BundleStatus,
+  type BundleUpdate,
+  type CatalogCandidate,
+  type CatalogCandidates,
   type RoutineStep,
 } from '@nordlys/shared';
 
@@ -37,6 +41,14 @@ export class BundleValidationError extends Error {
   }
 }
 
+/** Raised when this shop has no bundle with the requested id. */
+export class BundleNotFoundError extends Error {
+  constructor(id: string) {
+    super(`No routine set with id "${id}" belongs to this shop.`);
+    this.name = 'BundleNotFoundError';
+  }
+}
+
 type PrismaRoutineStep = 'CLEANSE' | 'TREAT' | 'MOISTURIZE';
 type PrismaBundleStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 
@@ -52,6 +64,12 @@ export function fromPrismaBundleStatus(
   status: PrismaBundleStatus,
 ): BundleStatus {
   return status.toLowerCase() as BundleStatus;
+}
+
+export function toPrismaBundleStatus(
+  status: BundleStatus,
+): PrismaBundleStatus {
+  return status.toUpperCase() as PrismaBundleStatus;
 }
 
 interface ProductNode {
@@ -113,6 +131,49 @@ async function fetchProducts(
   return byGid;
 }
 
+/** The columns every bundle response is built from. */
+interface BundleRow {
+  id: string;
+  title: string;
+  handle: string;
+  status: PrismaBundleStatus;
+  updatedAt: Date;
+  items: {
+    productGid: string;
+    routineStep: PrismaRoutineStep;
+    position: number;
+  }[];
+}
+
+/**
+ * Join one stored bundle with what Shopify says about its products.
+ *
+ * A product missing from the map is not an error: `nodes(ids:)` answers `null`
+ * for anything this token can no longer see, which is what a product deleted
+ * since it was added looks like. That becomes `title: null`, and the screen
+ * renders it as "no longer in the catalog" rather than showing a name that is
+ * no longer true.
+ */
+function toBundle(row: BundleRow, products: Map<string, ProductNode>): Bundle {
+  return {
+    id: row.id,
+    title: row.title,
+    handle: row.handle,
+    status: fromPrismaBundleStatus(row.status),
+    updatedAt: row.updatedAt.toISOString(),
+    items: row.items.map((item): BundleItem => {
+      const product = products.get(item.productGid);
+      return {
+        productGid: item.productGid,
+        routineStep: fromPrismaRoutineStep(item.routineStep),
+        position: item.position,
+        title: product?.title ?? null,
+        productStatus: product?.status ?? null,
+      };
+    }),
+  };
+}
+
 export async function listBundles(
   prisma: PrismaClient,
   graphql: AdminGraphql,
@@ -132,23 +193,7 @@ export async function listBundles(
   ];
   const products = await fetchProducts(graphql, gids);
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    handle: row.handle,
-    status: fromPrismaBundleStatus(row.status),
-    updatedAt: row.updatedAt.toISOString(),
-    items: row.items.map((item): BundleItem => {
-      const product = products.get(item.productGid);
-      return {
-        productGid: item.productGid,
-        routineStep: fromPrismaRoutineStep(item.routineStep),
-        position: item.position,
-        title: product?.title ?? null,
-        productStatus: product?.status ?? null,
-      };
-    }),
-  }));
+  return rows.map((row) => toBundle(row, products));
 }
 
 /**
@@ -215,23 +260,168 @@ export async function createStarterBundle(
     [...chosen.values()].map((product) => [product.id, product]),
   );
 
-  return {
-    id: row.id,
-    title: row.title,
-    handle: row.handle,
-    status: fromPrismaBundleStatus(row.status),
-    updatedAt: row.updatedAt.toISOString(),
-    items: row.items.map((item): BundleItem => {
-      const product = byGid.get(item.productGid);
-      return {
-        productGid: item.productGid,
-        routineStep: fromPrismaRoutineStep(item.routineStep),
-        position: item.position,
-        title: product?.title ?? null,
-        productStatus: product?.status ?? null,
-      };
-    }),
-  };
+  return toBundle(row, byGid);
+}
+
+/**
+ * Change a bundle the merchant already has.
+ *
+ * The interesting decision here is **where the catalog is checked.** A draft is
+ * the merchant's workspace: half-finished sets, products that are not published
+ * yet, a slot pointed at something they mean to fix. Refusing those edits would
+ * make the app harder to use than the admin it lives in. ACTIVE is different —
+ * it is the state the storefront renders — so the catalog checks are attached
+ * to activation rather than to editing.
+ *
+ * The three conditions are exactly the ones `product.reconcile` demotes a
+ * bundle for when a merchant changes a product afterwards (see
+ * `job-handlers.ts`): the product must exist, be active, and carry the step it
+ * is being used as. One invariant, enforced at both ends — anything else would
+ * let the app accept a set and then demote it moments later without the
+ * merchant having done anything.
+ */
+export async function updateBundle(
+  prisma: PrismaClient,
+  graphql: AdminGraphql,
+  shop: string,
+  id: string,
+  update: BundleUpdate,
+): Promise<Bundle> {
+  const existing = await prisma.bundle.findFirst({
+    // Scoped to the shop: an id on its own is another tenant's row.
+    where: { id, shop },
+    include: { items: { orderBy: { position: 'asc' } } },
+  });
+
+  if (!existing) throw new BundleNotFoundError(id);
+
+  const items: BundleItemInput[] =
+    update.items ??
+    existing.items.map((item) => ({
+      productGid: item.productGid,
+      routineStep: fromPrismaRoutineStep(item.routineStep),
+    }));
+
+  const status = update.status ?? fromPrismaBundleStatus(existing.status);
+
+  // One call for the whole set, and the same call serves both the validation
+  // below and the response — the titles have to be read live either way.
+  const products = await fetchProducts(
+    graphql,
+    items.map((item) => item.productGid),
+  );
+
+  if (status === 'active') {
+    assertActivatable(items, products);
+  }
+
+  const row = await prisma.$transaction(async (tx) => {
+    if (update.items) {
+      // Replaced rather than reconciled slot by slot. The unique index on
+      // `[bundleId, routineStep]` makes a partial update order-dependent —
+      // moving a product from treat to cleanse collides with whatever is in
+      // cleanse until that row is gone — and inside one transaction the
+      // delete-then-create is atomic, so no reader ever sees the empty set.
+      await tx.bundleItem.deleteMany({ where: { bundleId: existing.id } });
+    }
+
+    return tx.bundle.update({
+      // Both, again: Prisma allows non-unique fields alongside the id here, and
+      // a write scoped only by id would be reachable from another shop.
+      where: { id: existing.id, shop },
+      data: {
+        ...(update.title === undefined ? {} : { title: update.title }),
+        ...(update.status === undefined
+          ? {}
+          : { status: toPrismaBundleStatus(update.status) }),
+        ...(update.items === undefined
+          ? {}
+          : {
+              items: {
+                create: update.items.map((item) => ({
+                  productGid: item.productGid,
+                  routineStep: toPrismaRoutineStep(item.routineStep),
+                  // Not the client's to choose: a routine is a sequence, and
+                  // the order is the one ROUTINE_STEPS declares.
+                  position: ROUTINE_STEPS.indexOf(item.routineStep),
+                })),
+              },
+            }),
+      },
+      include: { items: { orderBy: { position: 'asc' } } },
+    });
+  });
+
+  return toBundle(row, products);
+}
+
+/**
+ * Refuse to activate a set the storefront could not render.
+ *
+ * Every problem is collected rather than thrown on the first one: a merchant
+ * fixing three slots one round trip at a time is a worse experience than being
+ * told all three at once, and the error envelope already carries a `detail`
+ * array for exactly this.
+ */
+function assertActivatable(
+  items: readonly BundleItemInput[],
+  products: Map<string, ProductNode>,
+): void {
+  const problems: string[] = [];
+
+  for (const item of items) {
+    const product = products.get(item.productGid);
+
+    if (!product) {
+      problems.push(
+        `${item.routineStep}: the product is not in the catalog any more.`,
+      );
+      continue;
+    }
+
+    if (product.status !== 'ACTIVE') {
+      problems.push(
+        `${item.routineStep}: "${product.title}" is ${product.status.toLowerCase()} ` +
+          `in Shopify, so the storefront cannot show it.`,
+      );
+      continue;
+    }
+
+    const step = product.routineStep?.value ?? null;
+    if (step !== item.routineStep) {
+      problems.push(
+        `${item.routineStep}: "${product.title}" has custom.routine_step = ` +
+          `${step === null ? '(not set)' : `"${step}"`}. The theme filters on ` +
+          `that metafield, so it would not appear in this slot.`,
+      );
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new BundleValidationError(
+      'This routine set cannot be activated yet.',
+      problems,
+    );
+  }
+}
+
+/**
+ * Delete a bundle.
+ *
+ * `deleteMany` with the shop in the filter rather than a read followed by a
+ * delete by id: the row count answers "was it yours?" in the same statement
+ * that removes it, and there is no window between the two for a concurrent
+ * delete to make the answer wrong. `BundleItem` goes with it — the relation
+ * cascades in the schema, so the items cannot outlive their bundle.
+ */
+export async function deleteBundle(
+  prisma: PrismaClient,
+  shop: string,
+  id: string,
+): Promise<void> {
+  const deleted = await prisma.bundle.deleteMany({ where: { id, shop } });
+
+  if (deleted.count === 0) throw new BundleNotFoundError(id);
 }
 
 interface CatalogSearchResult {
@@ -251,17 +441,106 @@ interface CatalogSearchResult {
  * filtering products by a metafield needs the definition to be
  * admin-filterable, which this store's is not — and asking for a filter the
  * definition cannot serve returns everything, silently. So the grouping happens
- * here.
- *
- * Rule 4: this is a loop of Admin API calls, so each response feeds the
- * throttle gate and the next page waits when the bucket cannot afford it.
+ * here, in the visitor {@link scanActiveCatalog} calls.
  */
 async function findFirstProductPerStep(
   graphql: AdminGraphql,
   throttleOptions: ThrottleGateOptions,
 ): Promise<CatalogSearchResult> {
-  const gate = createThrottleGate(throttleOptions);
   const chosen = new Map<RoutineStep, ProductNode>();
+
+  const { scanned, exhausted } = await scanActiveCatalog(
+    graphql,
+    throttleOptions,
+    (product) => {
+      const step = routineStepOf(product);
+      if (step && !chosen.has(step)) chosen.set(step, product);
+
+      // Every step filled: nothing later in the catalog can change the answer.
+      return chosen.size === ROUTINE_STEPS.length ? 'stop' : 'continue';
+    },
+  );
+
+  return { chosen, scanned, exhausted };
+}
+
+/** How many products per step the editor's picker offers. */
+const MAX_CANDIDATES_PER_STEP = 100;
+
+/**
+ * The products the bundle editor offers for each step.
+ *
+ * Same walk as the starter search, different stopping rule: it collects until
+ * every step has enough options to choose from rather than until every step has
+ * one. The cap is per step because the interesting case is a catalog where one
+ * step is common and another is rare — stopping at a total would fill the list
+ * with cleansers and never reach a single moisturizer.
+ *
+ * What this cannot do is offer the whole catalog, and the result says so.
+ * `custom.routine_step` is not admin-filterable, so "all products whose step is
+ * treat" is not a question the Admin API can be asked in a request; the
+ * complete answer is a bulk operation (ADR-0004), which is what the catalog
+ * export is for.
+ */
+export async function listCandidateProducts(
+  graphql: AdminGraphql,
+  throttleOptions: ThrottleGateOptions = {},
+): Promise<CatalogCandidates> {
+  const candidates: CatalogCandidate[] = [];
+  const perStep = new Map<RoutineStep, number>();
+
+  const { scanned, exhausted } = await scanActiveCatalog(
+    graphql,
+    throttleOptions,
+    (product) => {
+      const step = routineStepOf(product);
+      if (!step) return 'continue';
+
+      const taken = perStep.get(step) ?? 0;
+      if (taken < MAX_CANDIDATES_PER_STEP) {
+        perStep.set(step, taken + 1);
+        candidates.push({
+          productGid: product.id,
+          title: product.title,
+          routineStep: step,
+          productStatus: product.status,
+        });
+      }
+
+      const full = ROUTINE_STEPS.every(
+        (candidate) => (perStep.get(candidate) ?? 0) >= MAX_CANDIDATES_PER_STEP,
+      );
+      return full ? 'stop' : 'continue';
+    },
+  );
+
+  return { candidates, scanned, exhausted };
+}
+
+/** The step a product declares, or `null` if it declares none this app knows. */
+function routineStepOf(product: ProductNode): RoutineStep | null {
+  const value = product.routineStep?.value;
+  if (!value) return null;
+
+  return ROUTINE_STEPS.find((step) => step === value) ?? null;
+}
+
+/** Told for each product whether the caller has seen enough. */
+type ScanVisitor = (product: ProductNode) => 'continue' | 'stop';
+
+/**
+ * Walk the active catalog, page by page, until the visitor says stop or the
+ * pages run out.
+ *
+ * Rule 4: this is a loop of Admin API calls, so each response feeds the
+ * throttle gate and the next page waits when the bucket cannot afford it.
+ */
+async function scanActiveCatalog(
+  graphql: AdminGraphql,
+  throttleOptions: ThrottleGateOptions,
+  visit: ScanVisitor,
+): Promise<{ scanned: number; exhausted: boolean }> {
+  const gate = createThrottleGate(throttleOptions);
 
   let after: string | null = null;
   let scanned = 0;
@@ -283,22 +562,21 @@ async function findFirstProductPerStep(
 
     const { products } = unwrap('RoutineStepProducts', response);
 
+    let stop = false;
+
     for (const product of products.nodes) {
       scanned += 1;
-
-      const value = product.routineStep?.value;
-      if (!value) continue;
-
-      const step = ROUTINE_STEPS.find((candidate) => candidate === value);
-      if (step && !chosen.has(step)) {
-        chosen.set(step, product);
+      if (visit(product) === 'stop') {
+        stop = true;
+        break;
       }
     }
 
-    // Every step filled: nothing later in the catalog can change the answer,
-    // and `exhausted` only shapes the "not found" message, which is not needed.
-    if (chosen.size === ROUTINE_STEPS.length) {
-      return { chosen, scanned, exhausted: !products.pageInfo.hasNextPage };
+    if (stop) {
+      // Whether the rest of the catalog was read is still worth reporting: it
+      // is the difference between "these are all of them" and "these are the
+      // first of them".
+      return { scanned, exhausted: !products.pageInfo.hasNextPage };
     }
 
     if (!products.pageInfo.hasNextPage) {
@@ -315,7 +593,7 @@ async function findFirstProductPerStep(
     }
   }
 
-  return { chosen, scanned, exhausted };
+  return { scanned, exhausted };
 }
 
 interface NewBundleItem {

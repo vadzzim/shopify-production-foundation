@@ -4,13 +4,17 @@ import express, {
   type Router,
 } from 'express';
 import type { PrismaClient } from '@prisma/client';
-import type { ApiError } from '@nordlys/shared';
+import { bundleUpdateSchema, type ApiError } from '@nordlys/shared';
 
 import { AdminApiError, type AdminGraphql } from './admin-graphql';
 import {
+  BundleNotFoundError,
   BundleValidationError,
   createStarterBundle,
+  deleteBundle,
   listBundles,
+  listCandidateProducts,
+  updateBundle,
 } from './bundles';
 import { logger } from './logger';
 import { ensureStoreDefinitions } from './store-setup';
@@ -83,6 +87,14 @@ export const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => 
     return;
   }
 
+  if (error instanceof BundleNotFoundError) {
+    // 404 for a bundle belonging to another shop as well as for one that does
+    // not exist. The distinction is real but not the caller's to learn: telling
+    // them "that id exists, just not for you" is a cross-tenant disclosure.
+    sendError(res, 'not_found', error.message);
+    return;
+  }
+
   if (error instanceof JobNotRetryableError) {
     // 404 rather than 409: from the caller's side a job that is not theirs, not
     // there, or not in a retryable state are the same answer — this id is not
@@ -138,6 +150,45 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     const { shop, graphql } = deps.contextFor(res);
     const bundle = await createStarterBundle(deps.prisma, graphql, shop);
     res.status(201).json({ bundle });
+  });
+
+  router.patch('/bundles/:id', async (req, res) => {
+    const { shop, graphql } = deps.contextFor(res);
+    const parsed = bundleUpdateSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      // The issues verbatim, one per field. `detail` is rendered as a list in
+      // the error banner, so "items: the same product is used for more than one
+      // step" reaches the merchant instead of "invalid request".
+      throw new BundleValidationError(
+        'This change was not accepted.',
+        parsed.error.issues.map(
+          (issue) => `${issue.path.join('.') || '(body)'}: ${issue.message}`,
+        ),
+      );
+    }
+
+    const bundle = await updateBundle(
+      deps.prisma,
+      graphql,
+      shop,
+      req.params.id,
+      parsed.data,
+    );
+    res.json({ bundle });
+  });
+
+  router.delete('/bundles/:id', async (req, res) => {
+    const { shop } = deps.contextFor(res);
+    await deleteBundle(deps.prisma, shop, req.params.id);
+    // 204 rather than the deleted row: there is nothing left to describe, and
+    // returning a body invites a client to render what it just removed.
+    res.status(204).end();
+  });
+
+  router.get('/catalog/candidates', async (_req, res) => {
+    const { graphql } = deps.contextFor(res);
+    res.json(await listCandidateProducts(graphql));
   });
 
   router.get('/jobs', async (_req, res) => {

@@ -2,7 +2,14 @@ import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 
 import type { AdminGraphql } from './admin-graphql';
-import { BundleValidationError, createStarterBundle } from './bundles';
+import {
+  BundleNotFoundError,
+  BundleValidationError,
+  createStarterBundle,
+  deleteBundle,
+  listCandidateProducts,
+  updateBundle,
+} from './bundles';
 
 const SHOP = 'ecorn-oj1cb5ll.myshopify.com';
 
@@ -247,5 +254,430 @@ describe('createStarterBundle', () => {
     expect(
       bundle.items.find((item) => item.routineStep === 'cleanse')?.title,
     ).toBe('Product 3');
+  });
+});
+
+type PrismaStep = 'CLEANSE' | 'TREAT' | 'MOISTURIZE';
+
+interface StoredItem {
+  id: string;
+  bundleId: string;
+  productGid: string;
+  routineStep: PrismaStep;
+  position: number;
+}
+
+interface StoredBundle {
+  id: string;
+  shop: string;
+  title: string;
+  handle: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  createdAt: Date;
+  updatedAt: Date;
+  items: StoredItem[];
+}
+
+function storedItem(gid: string, step: PrismaStep, position: number): StoredItem {
+  return {
+    id: `item_${step}`,
+    bundleId: 'bundle_1',
+    productGid: `gid://shopify/Product/${gid}`,
+    routineStep: step,
+    position,
+  };
+}
+
+function storedBundle(overrides: Partial<StoredBundle> = {}): StoredBundle {
+  return {
+    id: 'bundle_1',
+    shop: SHOP,
+    title: 'Routine set 1',
+    handle: 'routine-set-1',
+    status: 'DRAFT',
+    createdAt: new Date('2026-09-08T00:00:00.000Z'),
+    updatedAt: new Date('2026-09-08T00:00:00.000Z'),
+    items: [
+      storedItem('1', 'CLEANSE', 0),
+      storedItem('2', 'TREAT', 1),
+      storedItem('3', 'MOISTURIZE', 2),
+    ],
+    ...overrides,
+  };
+}
+
+interface UpdateArgs {
+  where: { id: string; shop?: string };
+  data: {
+    title?: string;
+    status?: StoredBundle['status'];
+    items?: {
+      create: { productGid: string; routineStep: PrismaStep; position: number }[];
+    };
+  };
+}
+
+/**
+ * A prisma double that actually stores what it is told.
+ *
+ * The editing tests are about what ends up in the row — which slots, in which
+ * order, under which status — so a client that only records calls would leave
+ * every assertion checking the test's own expectations. `$transaction` runs the
+ * callback against the same object, which is enough to exercise the
+ * delete-then-create sequence in `updateBundle`.
+ */
+function editablePrisma(rows: StoredBundle[]) {
+  const store = rows.map((row) => ({ ...row, items: [...row.items] }));
+
+  const client = {
+    bundle: {
+      findFirst: async ({ where }: { where: { id: string; shop: string } }) =>
+        store.find(
+          (row) => row.id === where.id && row.shop === where.shop,
+        ) ?? null,
+
+      update: async ({ where, data }: UpdateArgs) => {
+        const row = store.find(
+          (candidate) =>
+            candidate.id === where.id &&
+            (where.shop === undefined || candidate.shop === where.shop),
+        );
+        if (!row) throw new Error('update matched no row');
+
+        if (data.title !== undefined) row.title = data.title;
+        if (data.status !== undefined) row.status = data.status;
+        if (data.items !== undefined) {
+          row.items = data.items.create.map((item, index) => ({
+            id: `new_item_${String(index)}`,
+            bundleId: row.id,
+            ...item,
+          }));
+        }
+        row.updatedAt = new Date('2026-09-08T12:00:00.000Z');
+
+        // Both call sites include `items` with `orderBy: { position: 'asc' }`,
+        // and that ordering is the only thing that guarantees a routine reads
+        // cleanse, treat, moisturize — rows come back in no particular order
+        // otherwise. The double honours it rather than returning insertion
+        // order, which would let a missing `orderBy` pass unnoticed here.
+        return {
+          ...row,
+          items: [...row.items].toSorted((a, b) => a.position - b.position),
+        };
+      },
+
+      deleteMany: async ({ where }: { where: { id: string; shop: string } }) => {
+        const index = store.findIndex(
+          (row) => row.id === where.id && row.shop === where.shop,
+        );
+        if (index === -1) return { count: 0 };
+        store.splice(index, 1);
+        return { count: 1 };
+      },
+    },
+
+    bundleItem: {
+      deleteMany: async ({ where }: { where: { bundleId: string } }) => {
+        const row = store.find((candidate) => candidate.id === where.bundleId);
+        const count = row?.items.length ?? 0;
+        if (row) row.items = [];
+        return { count };
+      },
+    },
+
+    $transaction: async <T>(run: (tx: unknown) => Promise<T>) => run(client),
+  };
+
+  return { prisma: client as unknown as PrismaClient, store };
+}
+
+/** Answers `nodes(ids:)` from a fixed catalog, `null` for anything else. */
+function fakeProductLookup(products: FakeProduct[]): {
+  graphql: AdminGraphql;
+  calls: AdminCall[];
+} {
+  const calls: AdminCall[] = [];
+  const byGid = new Map(products.map((entry) => [entry.id, entry]));
+
+  const graphql: AdminGraphql = async (document, variables) => {
+    calls.push({ document, after: null });
+
+    if (!document.includes('BundleProducts')) {
+      throw new Error(`Unexpected document: ${document.slice(0, 40)}`);
+    }
+
+    const ids = (variables?.ids as string[] | undefined) ?? [];
+
+    return {
+      data: {
+        nodes: ids.map((id) => byGid.get(id) ?? null),
+      } as never,
+    };
+  };
+
+  return { graphql, calls };
+}
+
+const CATALOG = [product('1', 'cleanse'), product('2', 'treat'), product('3', 'moisturize')];
+
+describe('updateBundle', () => {
+  it('renames a set without touching its slots', async () => {
+    const { prisma, store } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup(CATALOG);
+
+    const bundle = await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+      title: 'Nordic winter routine',
+    });
+
+    expect(bundle.title).toBe('Nordic winter routine');
+    expect(bundle.items).toHaveLength(3);
+    expect(store[0]?.items.map((item) => item.id)).toEqual([
+      'item_CLEANSE',
+      'item_TREAT',
+      'item_MOISTURIZE',
+    ]);
+  });
+
+  it('leaves the handle alone when the title changes', async () => {
+    // The storefront links a routine set by its handle. Renaming is a
+    // correction of wording; moving a URL is not, and conflating the two breaks
+    // links a merchant may have shared.
+    const { prisma } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup(CATALOG);
+
+    const bundle = await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+      title: 'Renamed',
+    });
+
+    expect(bundle.handle).toBe('routine-set-1');
+  });
+
+  it('replaces the slots and orders them by routine step', async () => {
+    const { prisma, store } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup([
+      ...CATALOG,
+      product('9', 'moisturize'),
+    ]);
+
+    const bundle = await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+      // Deliberately out of order: position is derived, not accepted.
+      items: [
+        { productGid: 'gid://shopify/Product/9', routineStep: 'moisturize' },
+        { productGid: 'gid://shopify/Product/2', routineStep: 'treat' },
+        { productGid: 'gid://shopify/Product/1', routineStep: 'cleanse' },
+      ],
+    });
+
+    expect(bundle.items.map((item) => item.routineStep)).toEqual([
+      'cleanse',
+      'treat',
+      'moisturize',
+    ]);
+    // Stored positions follow the step, not the order the client happened to
+    // send its slots in.
+    expect(
+      store[0]?.items.map((item) => [item.routineStep, item.position]),
+    ).toEqual([
+      ['MOISTURIZE', 2],
+      ['TREAT', 1],
+      ['CLEANSE', 0],
+    ]);
+    expect(
+      bundle.items.find((item) => item.routineStep === 'moisturize')?.title,
+    ).toBe('Product 9');
+  });
+
+  it('accepts a draft whose product does not match the slot', async () => {
+    // A draft is the merchant's workspace. The catalog checks belong to
+    // activation, which is the state the storefront renders.
+    const { prisma } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup([
+      product('1', 'treat'),
+      product('2', 'treat'),
+      product('3', 'moisturize'),
+    ]);
+
+    const bundle = await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+      title: 'Work in progress',
+    });
+
+    expect(bundle.status).toBe('draft');
+  });
+
+  it('activates a set whose products all match', async () => {
+    const { prisma } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup(CATALOG);
+
+    const bundle = await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+      status: 'active',
+    });
+
+    expect(bundle.status).toBe('active');
+  });
+
+  it('refuses to activate a set holding a product with the wrong step', async () => {
+    // The same condition `product.reconcile` demotes a bundle for. Accepting it
+    // here would mean the app activated a set and then demoted it moments
+    // later without the merchant doing anything.
+    const { prisma, store } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup([
+      product('1', 'cleanse'),
+      product('2', 'moisturize'),
+      product('3', 'moisturize'),
+    ]);
+
+    await expect(
+      updateBundle(prisma, graphql, SHOP, 'bundle_1', { status: 'active' }),
+    ).rejects.toBeInstanceOf(BundleValidationError);
+
+    expect(store[0]?.status).toBe('DRAFT');
+  });
+
+  it('refuses to activate a set holding a draft product', async () => {
+    const { prisma } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup([
+      product('1', 'cleanse'),
+      { ...product('2', 'treat'), status: 'DRAFT' },
+      product('3', 'moisturize'),
+    ]);
+
+    try {
+      await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+        status: 'active',
+      });
+      expect.unreachable('updateBundle should have thrown');
+    } catch (error) {
+      const validation = error as BundleValidationError;
+      expect(validation.detail.join(' ')).toContain('draft in Shopify');
+    }
+  });
+
+  it('reports every unusable slot at once, not just the first', async () => {
+    const { prisma } = editablePrisma([storedBundle()]);
+    const { graphql } = fakeProductLookup([
+      // Product 1 is missing from the catalog entirely: `nodes(ids:)` answers
+      // null for a product deleted since it was added.
+      { ...product('2', 'treat'), status: 'ARCHIVED' },
+      product('3', 'cleanse'),
+    ]);
+
+    try {
+      await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+        status: 'active',
+      });
+      expect.unreachable('updateBundle should have thrown');
+    } catch (error) {
+      const validation = error as BundleValidationError;
+      expect(validation.detail).toHaveLength(3);
+      expect(validation.detail[0]).toContain('not in the catalog');
+      expect(validation.detail[1]).toContain('archived');
+      expect(validation.detail[2]).toContain('custom.routine_step');
+    }
+  });
+
+  it('does not find a bundle belonging to another shop', async () => {
+    const { prisma } = editablePrisma([
+      storedBundle({ shop: 'someone-else.myshopify.com' }),
+    ]);
+    const { graphql } = fakeProductLookup(CATALOG);
+
+    await expect(
+      updateBundle(prisma, graphql, SHOP, 'bundle_1', { title: 'Mine now' }),
+    ).rejects.toBeInstanceOf(BundleNotFoundError);
+  });
+
+  it('reads the catalog once for the whole set', async () => {
+    // One `nodes(ids:)` call serves both the activation checks and the titles
+    // in the response. Three calls would be three times the rate-limit cost for
+    // the same data.
+    const { prisma } = editablePrisma([storedBundle()]);
+    const { graphql, calls } = fakeProductLookup(CATALOG);
+
+    await updateBundle(prisma, graphql, SHOP, 'bundle_1', { status: 'active' });
+
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('deleteBundle', () => {
+  it('removes the set', async () => {
+    const { prisma, store } = editablePrisma([storedBundle()]);
+
+    await deleteBundle(prisma, SHOP, 'bundle_1');
+
+    expect(store).toHaveLength(0);
+  });
+
+  it('refuses an id belonging to another shop', async () => {
+    const { prisma, store } = editablePrisma([
+      storedBundle({ shop: 'someone-else.myshopify.com' }),
+    ]);
+
+    await expect(deleteBundle(prisma, SHOP, 'bundle_1')).rejects.toBeInstanceOf(
+      BundleNotFoundError,
+    );
+    expect(store).toHaveLength(1);
+  });
+});
+
+describe('listCandidateProducts', () => {
+  it('groups active products by the step they declare', async () => {
+    const { graphql } = fakeCatalog([
+      [
+        product('1', 'cleanse'),
+        product('2', 'cleanse'),
+        product('3', 'treat'),
+        product('4', null),
+        product('5', 'exfoliate'),
+      ],
+    ]);
+
+    const { candidates, scanned, exhausted } = await listCandidateProducts(
+      graphql,
+      noWait,
+    );
+
+    expect(candidates.map((entry) => entry.routineStep)).toEqual([
+      'cleanse',
+      'cleanse',
+      'treat',
+    ]);
+    expect(scanned).toBe(5);
+    expect(exhausted).toBe(true);
+  });
+
+  it('says the list is partial when the page cap stopped it', async () => {
+    // What the editor renders as "showing the first N products". A picker that
+    // silently truncates is how a merchant concludes a product cannot be added.
+    const pages = Array.from({ length: 11 }, (_unused, page) => [
+      product(`p${String(page)}`, 'cleanse'),
+    ]);
+    const { graphql } = fakeCatalog(pages);
+
+    const { exhausted, scanned } = await listCandidateProducts(graphql, noWait);
+
+    expect(exhausted).toBe(false);
+    expect(scanned).toBe(10);
+  });
+
+  it('stops once every step has a full page of options', async () => {
+    const many = [
+      ...Array.from({ length: 100 }, (_unused, index) =>
+        product(`c${String(index)}`, 'cleanse'),
+      ),
+      ...Array.from({ length: 100 }, (_unused, index) =>
+        product(`t${String(index)}`, 'treat'),
+      ),
+      ...Array.from({ length: 100 }, (_unused, index) =>
+        product(`m${String(index)}`, 'moisturize'),
+      ),
+      product('extra', 'cleanse'),
+    ];
+    const { graphql, calls } = fakeCatalog([many, [product('later', 'treat')]]);
+
+    const { candidates } = await listCandidateProducts(graphql, noWait);
+
+    expect(candidates).toHaveLength(300);
+    expect(calls).toHaveLength(1);
   });
 });
