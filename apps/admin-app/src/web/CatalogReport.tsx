@@ -37,6 +37,11 @@ function when(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/** "1 product", "2 products". A count of one is common enough here to matter. */
+function plural(count: number, noun: string): string {
+  return `${String(count)} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 export function CatalogReport(): React.JSX.Element {
   const [status, setStatus] = useState<CatalogExportStatus | null>(null);
   const [error, setError] = useState<ApiRequestError | null>(null);
@@ -152,7 +157,8 @@ function Summary({
   return (
     <s-stack direction="block" gap="base">
       <s-text color="subdued">
-        {report.objectCount} active products, read {when(report.completedAt)}
+        {plural(report.objectCount, 'active product')}, read{' '}
+        {when(report.completedAt)}
       </s-text>
 
       <s-table variant="auto">
@@ -183,7 +189,8 @@ function Summary({
       {report.withoutStep > 0 && (
         <s-stack direction="block" gap="small-300">
           <s-text>
-            {report.withoutStep} active products have no routine step.
+            {plural(report.withoutStep, 'active product')}{' '}
+            {report.withoutStep === 1 ? 'has' : 'have'} no routine step.
           </s-text>
           <s-unordered-list>
             {report.sampleWithoutStep.map((product) => (
@@ -207,7 +214,7 @@ function Summary({
           <s-unordered-list>
             {report.unrecognisedSteps.map((entry) => (
               <s-list-item key={entry.value}>
-                “{entry.value}” — {entry.count} products
+                “{entry.value}” — {plural(entry.count, 'product')}
               </s-list-item>
             ))}
           </s-unordered-list>
