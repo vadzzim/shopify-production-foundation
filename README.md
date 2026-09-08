@@ -9,9 +9,9 @@
 > the external ERP are stand-ins; the architecture, the code and the measurements
 > are not.
 
-**Status: documentation and architecture decisions.** Implementation starts with
-Phase 1 of the [roadmap](docs/roadmap.md); the tables below carry per-item status
-so this page stays accurate as work lands rather than being rewritten later.
+**Status: theme complete, admin app running locally.** Phase 1 of the
+[roadmap](docs/roadmap.md) is closed and phase 2 is most of the way there; the
+roadmap carries per-item status and is the authoritative list.
 
 **Live**
 - **Storefront:** not yet published — will be a Shopify preview URL with the
@@ -45,8 +45,8 @@ project starts from a base instead of from Dawn plus improvisation.
 
 | Area | Contents | Status |
 |---|---|---|
-| **Theme** (OS 2.0) | Dawn-based, custom sections with complete schemas, metaobject-driven content, bundle builder on the Ajax Cart API | planned — Phase 1 |
-| **App** | Embedded admin app: OAuth with offline and online tokens, Polaris UI, Admin GraphQL with cost-aware throttling and bulk operations | planned — Phase 2 |
+| **Theme** (OS 2.0) | Dawn-based, custom sections with complete schemas, metaobject-driven content, bundle builder on the Ajax Cart API | done — Phase 1 |
+| **App** | Embedded admin app: OAuth with offline and online tokens, Polaris UI, Admin GraphQL with cost-aware throttling and bulk operations | in progress — Phase 2. OAuth, session storage, store preparation and the bundle index are in; editing, the sync log and bulk operations are not |
 | **Integration** | HMAC-verified idempotent webhook intake, queue on a PostgreSQL table with backoff and a DLQ status, inventory sync | planned — Phase 3 |
 | **Decisions** | ADRs for the stack, the database and ORM choice, and hosting topology | done |
 | **Quality** | CI with typecheck, lint, tests, theme-check, secret scanning and Lighthouse budgets | CI configured; tests follow the code |
@@ -57,7 +57,7 @@ project starts from a base instead of from Dawn plus improvisation.
 flowchart LR
   Buyer[Customer] --> Theme[OS 2.0 Theme]
   Theme -->|Ajax Cart API| Shopify[(Shopify)]
-  Merchant[Merchant] --> App[Admin App<br/>React + Polaris]
+  Merchant[Merchant] --> App[Admin App<br/>Express + React + Polaris]
   App -->|Admin GraphQL| Shopify
   Shopify -->|webhooks HMAC| Receiver[Webhook Receiver<br/>Express]
   Receiver -->|enqueue| Queue[(Queue)]
@@ -81,17 +81,24 @@ foundation ends up proven rather than asserted. The three it has to handle:
 
 ## Measured results
 
-No measurements yet — Phase 1 has not started. The methodology is fixed in
-advance so the numbers cannot be selected after the fact:
-[`docs/performance/`](docs/performance/).
+Home page, mobile, median of five runs against the real CDN with Shopify's
+preview bar blocked. Method, per-optimisation breakdown and the raw run data are
+in [`docs/performance/`](docs/performance/) — including what was already Dawn's
+and is not being claimed, and what did not work.
 
 | Metric | Before | After |
 |---|---|---|
-| LCP (mobile) | | |
-| CLS | | |
-| INP | | |
-| Lighthouse Performance | | |
-| Lighthouse Accessibility | | |
+| LCP (mobile) | 5441 ms | 3031 ms |
+| Speed Index (mobile) | 4609 ms | 2817 ms |
+| CLS | 0.000 | 0.000 |
+| TBT (lab proxy for INP) | 159 ms | 137 ms |
+| Lighthouse Performance | 72 | 90 |
+| Lighthouse Accessibility | 97 | 100 |
+
+**No INP figure.** INP is a field metric and a Lighthouse lab run cannot produce
+one; TBT is the lab proxy and is what the table reports. Desktop went 99 → 98,
+which is noise: there was no performance headroom there to recover. The
+accessibility gain is real on both form factors.
 
 ## Engineering notes
 
@@ -108,23 +115,19 @@ the phases land.
 
 ## Using this as a project base
 
-What works today — local PostgreSQL, nothing else, since there is no application
-to start until Phase 2:
-
 ```bash
 docker compose up -d
-```
-
-From Phase 2 onward:
-
-```bash
 pnpm install
-cp .env.example .env
+cp .env.example .env          # then fill in the app credentials
 pnpm prisma migrate dev
 pnpm dev
 ```
 
 Already running PostgreSQL? Skip Docker and set `DATABASE_URL`.
+
+The app is embedded, so `pnpm dev` alone is not enough to see it: it has to be
+reachable over HTTPS and opened inside a store's admin. `shopify app dev`
+provisions that tunnel — see [`docs/development.md`](docs/development.md).
 
 Conventions and hard rules that any code here must follow are in
 [`CLAUDE.md`](CLAUDE.md); setup detail in
@@ -143,7 +146,7 @@ the boundary is deliberate rather than accidental:
 - Shopify Function for bundle discounts.
 - Checkout UI extension.
 - Two-way sync with a DLQ and conflict resolution.
-- Migrating the app off the Remix template to Express — ADR-0002.
+- Rebasing the theme on Shopify's Skeleton theme — [ADR-0011](docs/adr/0011-dawn-over-skeleton-theme.md).
 
 ## Authorship
 

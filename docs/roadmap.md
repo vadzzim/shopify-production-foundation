@@ -55,20 +55,28 @@ number.
 
 Bundle management and sync observability.
 
-- [ ] OAuth, offline plus online tokens, session storage
-      (`@shopify/shopify-app-session-storage-prisma`)
-- [ ] Prisma schema and first migration
-- [ ] Env validated with zod, failing at startup rather than on first use
-- [ ] Metafield and metaobject definitions created on app install
-      (`metafieldDefinitionCreate`) — the app prepares the store itself
-- [ ] Polaris UI: bundle list, editing, sync log page; empty states, skeletons,
-      explicit error messages
-- [ ] Admin GraphQL: `bulkOperationRunQuery` for catalog export, handling of
-      `extensions.cost.throttleStatus` with backoff and jitter, `userErrors`
-      handled in every mutation
+- [x] OAuth, offline plus online tokens, session storage
+      (`@shopify/shopify-app-session-storage-prisma`). Built on Express with
+      `@shopify/shopify-app-express` rather than Shopify's app template — see
+      [ADR-0002](adr/0002-express-over-the-app-template.md)
+- [x] Prisma schema and first migration
+- [x] Env validated with zod, failing at startup rather than on first use
+- [x] Metafield and metaobject definitions created on app install
+      (`metafieldDefinitionCreate`) — the app prepares the store itself.
+      Idempotent: `TAKEN` is a success, anything else is not
+- [~] Polaris UI: bundle list, empty state and explicit error messages are done;
+      editing and the sync log are not. The criterion said "skeletons": Polaris
+      1.0 ships no skeleton component, so the table's own `loading` state is
+      what the screen uses — see
+      [ADR-0015](adr/0015-polaris-web-components-over-polaris-react.md)
+- [~] Admin GraphQL: `extensions.cost.throttleStatus` read with backoff and
+      jitter, and `userErrors` handled in every mutation. Catalog export with
+      `bulkOperationRunQuery` is not written yet (ADR-0004)
 
 **Completion criterion:** the app installs on a clean store and works with no
-manual data preparation.
+manual data preparation. **Not yet verified** — `shopify app init` and
+`shopify app dev` are interactive, so the install has not been run end to end
+against `ecorn-oj1cb5ll`. Everything below the install is exercised by tests.
 
 ---
 
@@ -109,12 +117,6 @@ an external system failure is visible in the UI and can be retried manually.
 
 Deliberately outside the current stage. Decisions are recorded; execution deferred.
 
-### Migrating the app to Express
-
-The app currently runs on Shopify's default Remix template; the webhook receiver
-and the worker are on Express. A full move to Express gives control over the
-middleware layer. See ADR-0002.
-
 ### Full integration
 
 - `services/mock-erp` — a standalone service with REST, signed outbound webhooks,
@@ -145,8 +147,8 @@ layer exists to carry over. See [ADR-0011](adr/0011-dawn-over-skeleton-theme.md)
 
 ### Infrastructure
 
-- pnpm workspace, `packages/shared` for shared types and zod schemas
-- Types generated from the GraphQL schema instead of hand-written definitions
+- Types generated from the GraphQL schema instead of the hand-written response
+  interfaces in `apps/admin-app/src/server`
 - Playwright e2e against the preview theme
 - `/healthz`, `/readyz`, counters for processed and failed jobs
 - Extracting the worker into its own process (it currently runs inside the app)
