@@ -112,6 +112,9 @@ describe('GET /api/bundles', () => {
   });
 
   it('answers 502 with Shopify’s own message when the Admin API fails', async () => {
+    // This is the shape `adminGraphqlFor` produces from a thrown SDK error —
+    // the SDK throws rather than returning `errors`, and the translation is
+    // covered in admin-graphql.test.ts.
     const graphql: AdminGraphql = async () => ({
       errors: {
         networkStatusCode: 503,
@@ -184,6 +187,9 @@ describe('POST /api/bundles/starter', () => {
               routineStep: { value: 'cleanse' },
             },
           ],
+          // One page, and the last one — so the message may say the catalog was
+          // read in full. See bundles.test.ts for the paging behaviour itself.
+          pageInfo: { hasNextPage: false, endCursor: null },
         },
       } as never,
     });
