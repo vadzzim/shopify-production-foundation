@@ -1,0 +1,20 @@
+{
+  "name": "@nordlys/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Types, zod schemas and constants shared by the app, the worker and the theme app extension.",
+  "//": "Consumed as TypeScript source. There is no build step: every consumer (tsx, Vite, Vitest, tsc) compiles TS itself, and a dist/ would only add a stale artifact to keep in sync.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
+  }
+}
