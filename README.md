@@ -9,21 +9,42 @@
 > the external ERP are stand-ins; the architecture, the code and the measurements
 > are not.
 
-**Status: theme complete; app and integration layer written and tested, not yet
-verified against a live store.** Phase 1 of the [roadmap](docs/roadmap.md) is
-closed, and the code for phases 2 and 3 is in — webhook intake, the queue, the
-worker and the job handlers included. What is missing is not code: the app has
-never been opened in a Shopify admin, so no install and no webhook delivery has
-been observed from Shopify's side. The roadmap carries per-item status and is
-the authoritative list.
+**Status: theme complete; admin app and integration layer written and tested.**
+Phase 1 of the [roadmap](docs/roadmap.md) is closed, and the code for phases 2
+and 3 is in: OAuth with offline and online tokens, the bundle editor, a bulk
+catalog export, HMAC-verified idempotent webhook intake, a PostgreSQL queue with
+backoff and a dead-letter state, the worker and the job handlers — exercised by
+integration tests against a real PostgreSQL, not mocks.
+
+**What that does not include: none of it has been verified against a live
+store.** The app has never been opened in a Shopify admin, so no install and no
+webhook delivery has been observed from Shopify's side. That is a missing
+observation rather than missing code, and the two are kept apart deliberately —
+the [roadmap](docs/roadmap.md) carries per-item status and is the authoritative
+list.
 
 **Live**
 - **Storefront:** not yet published — will be a Shopify preview URL with the
   development store password
 - **App:** an embedded admin app cannot be opened outside a store's admin, so it
-  runs locally and is demonstrated by video; deployment topology and rationale are
-  in [ADR-0008](docs/adr/0008-hosting-topology.md).
+  runs locally; the screens are below and in [`docs/app/`](docs/app/), and the
+  deployment topology is in [ADR-0008](docs/adr/0008-hosting-topology.md)
 - **Code:** this repository
+
+![The bundle index in three states: empty on a fresh install, loaded, and failed after a mutation returned HTTP 200 with userErrors](docs/app/ui-states.png)
+
+The routine-set index in its three states — empty on a fresh install, loaded,
+and failed after a mutation returned **HTTP 200 with `userErrors`**, the failure
+mode this repository exists to stop being a surprise. The second row shows a
+product whose GID is stored here but which the Admin API no longer returns: the
+cell reads **Removed** rather than a name last seen weeks ago.
+
+These are the real Polaris web components from `polaris-1.js` with the same
+markup as [`App.tsx`](apps/admin-app/src/web/App.tsx), rendered in headless
+Chrome from fixed data — not photographed inside the Shopify admin, because the
+app has not been installed in one yet. So they show what the components do; they
+do not prove the app installs. [`docs/app/`](docs/app/) says the same thing at
+length, and reads each screen detail by detail.
 
 ---
 
@@ -108,6 +129,36 @@ What to look at, and in what order, on the home page:
 Every custom section carries a complete schema with `presets`, so all of the
 above is configurable in the theme editor without touching code.
 
+### Admin app screens
+
+Captured the same way as the screenshot above, with the same caveat: real
+Polaris web components and the app's own markup, rendered from fixed data rather
+than photographed in an admin. Each one is there for a specific claim, and
+[`docs/app/`](docs/app/) argues them in full.
+
+**The sync log** — the queue as a merchant meets it. The top row has spent all
+five attempts and will not be retried automatically; it carries the reason
+Shopify gave and a Retry button, which is phase 3's completion criterion
+rendered. Retry appears only where it means something, and the correlation id
+under each event is Shopify's own delivery id, so a row ties to every log line
+the delivery produced.
+
+![The sync log: five queue rows including a dead job with its reason and a Retry button](docs/app/sync-log.png)
+
+**The routine set editor** — activation refused, with every mismatched slot
+named at once in Shopify's terms: which product, what its `custom.routine_step`
+actually says, and why the storefront would not show it. The catalog checks
+belong to activation rather than to editing, so a draft stays a workspace.
+
+![The routine set editor with activation refused and every mismatched slot named](docs/app/bundle-editor.png)
+
+**The catalog report** — what a finished bulk export says about the store,
+including the one case nothing else can surface: a product whose metafield reads
+`moisturise` is invisible to every other screen and to the storefront section,
+because both filter on the exact choice-list value.
+
+![The catalog report showing per-step counts, products with no routine step, and a misspelled step](docs/app/catalog-report.png)
+
 ## Measured results
 
 Home page, mobile, median of five runs against the real CDN with Shopify's
@@ -189,6 +240,7 @@ model mistakes caught in review are documented in
 - [Roadmap and scope boundaries](docs/roadmap.md)
 - [Local development](docs/development.md)
 - [Architecture Decision Records](docs/adr/)
+- [Admin app screens, read detail by detail](docs/app/)
 - [Estimates and actuals](docs/estimates.md)
 - [AI-assisted workflow](docs/ai-workflow.md)
 - [Performance measurements](docs/performance/)
