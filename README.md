@@ -9,9 +9,13 @@
 > the external ERP are stand-ins; the architecture, the code and the measurements
 > are not.
 
-**Status: theme complete, admin app running locally.** Phase 1 of the
-[roadmap](docs/roadmap.md) is closed and phase 2 is most of the way there; the
-roadmap carries per-item status and is the authoritative list.
+**Status: theme complete; app and integration layer written and tested, not yet
+verified against a live store.** Phase 1 of the [roadmap](docs/roadmap.md) is
+closed, and the code for phases 2 and 3 is in — webhook intake, the queue, the
+worker and the job handlers included. What is missing is not code: the app has
+never been opened in a Shopify admin, so no install and no webhook delivery has
+been observed from Shopify's side. The roadmap carries per-item status and is
+the authoritative list.
 
 **Live**
 - **Storefront:** not yet published — will be a Shopify preview URL with the
@@ -46,10 +50,10 @@ project starts from a base instead of from Dawn plus improvisation.
 | Area | Contents | Status |
 |---|---|---|
 | **Theme** (OS 2.0) | Dawn-based, custom sections with complete schemas, metaobject-driven content, bundle builder on the Ajax Cart API | done — Phase 1 |
-| **App** | Embedded admin app: OAuth with offline and online tokens, Polaris UI, Admin GraphQL with cost-aware throttling and bulk operations | in progress — Phase 2. OAuth, session storage, store preparation and the bundle index are in; editing, the sync log and bulk operations are not |
-| **Integration** | HMAC-verified idempotent webhook intake, queue on a PostgreSQL table with backoff and a DLQ status, inventory sync | planned — Phase 3 |
-| **Decisions** | ADRs for the stack, the database and ORM choice, and hosting topology | done |
-| **Quality** | CI with typecheck, lint, tests, theme-check, secret scanning and Lighthouse budgets | CI configured; tests follow the code |
+| **App** | Embedded admin app: OAuth with offline and online tokens, Polaris UI, store preparation, bundle index and editor, catalog export, sync log, Admin GraphQL with cost-aware throttling and bulk operations | written — Phase 2. Every feature is in and tested; the install has not been run against a clean store |
+| **Integration** | HMAC-verified idempotent webhook intake, queue on a PostgreSQL table with backoff, a reaper and a `DEAD` dead-letter status, in-process worker, job handlers, inventory writes on the InventoryItem × Location pair | written — Phase 3, except the producer. The intake, queue, worker and handlers are in and exercised against a real PostgreSQL; `inventory.push` has no producer until the mock ERP (roadmap v2), so it is enqueued by hand ([ADR-0017](docs/adr/0017-inventory-writes.md)) |
+| **Decisions** | 17 ADRs: the stack, Express over the app template, database and ORM, API version pinning, bulk operations, metaobjects, webhook ingestion, inventory writes, job claim ownership, and the theme choices | done |
+| **Quality** | CI with typecheck, lint, tests, theme-check, secret scanning and Lighthouse budgets. 24 test files, 5 of them integration tests against a real PostgreSQL | CI configured; the properties the queue rests on are asserted against the database rather than a mock |
 
 ## Architecture
 

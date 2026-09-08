@@ -18,12 +18,29 @@ be unwound later, and every non-obvious decision recorded in an ADR.
 Updated 2026-09-08.
 
 Present: `theme/` (Dawn-based, phase 1 closed), `apps/admin-app/` (Express +
-React, phase 2 in progress), `packages/shared/`, `prisma/` with its migrations,
-the pnpm workspace at the root, and `docs/`.
+React), `packages/shared/`, `prisma/` with its migrations, the pnpm workspace at
+the root, and `docs/`.
 
-Not present yet: `extensions/` (theme app extension, roadmap v2),
-`services/mock-erp` (roadmap v2), the webhook handlers and the queue (phase 3 —
-the `Session` and `Bundle` tables are the whole schema so far).
+Phases 2 and 3 are both written. The admin app carries OAuth with offline and
+online tokens, store preparation, the bundle index and editor, the catalog
+export, the sync log, and cost-aware Admin GraphQL. The integration layer
+carries webhook intake (`webhook-router.ts`, `webhook-verify.ts`), the queue and
+its reaper (`queue.ts`), the in-process worker (`worker.ts`) and the job
+handlers (`job-handlers.ts`). The schema is `Session`, `Bundle`, `BundleItem`,
+`WebhookDelivery` and `Job`, in three migrations.
+
+What "written" does not mean: **neither phase has been verified against a live
+store.** The app has never been opened in a Shopify admin, so no webhook has
+arrived from Shopify and no install has run end to end. Everything below that
+line is exercised by tests, including integration tests against a real
+PostgreSQL. Treat the roadmap's per-item status as authoritative and do not
+describe this repository as production-proven.
+
+Not present yet: `services/mock-erp` (roadmap v2), which is what would enqueue
+`inventory.push` jobs — the handler, the mutation and its idempotency key exist
+and are tested, but nothing in production code produces that kind, so it is
+enqueued by hand today (ADR-0017). `extensions/` exists locally as an empty
+placeholder; the theme app extension itself is roadmap v2.
 
 Paths referenced in the rules below describe the **target structure** where they
 do not exist yet, and are created as work proceeds. A rule pointing at a file
