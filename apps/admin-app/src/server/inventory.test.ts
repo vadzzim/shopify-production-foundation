@@ -77,6 +77,26 @@ describe('pushInventoryOnHand', () => {
     expect(sentVariables(graphql).input).toMatchObject({ name: 'on_hand' });
   });
 
+  it('states changeFromQuantity explicitly, as the null that skips the check', async () => {
+    // Shopify treats the compare-and-swap field as mandatory *and* nullable:
+    // `null` skips the check, but leaving the key out is an error, so the whole
+    // mutation fails and no stock is written. An assertion on the value alone
+    // would not catch that — an absent key reads as `undefined`, which is not
+    // `null` — so this checks the key is really there.
+    const graphql = succeeding();
+
+    await pushInventoryOnHand(graphql, PAYLOAD, { idempotencyKey: 'job-1' });
+
+    const input = sentVariables(graphql).input as {
+      quantities: Record<string, unknown>[];
+    };
+    const [quantity] = input.quantities;
+    if (!quantity) throw new Error('The mutation sent no quantities.');
+
+    expect(Object.keys(quantity)).toContain('changeFromQuantity');
+    expect(quantity.changeFromQuantity).toBeNull();
+  });
+
   it('sends the job id as the idempotency key Shopify requires', async () => {
     // Required by the mutation since 2026-04, and the reason a queue retry
     // cannot double-apply a write: the retried row carries the same id.

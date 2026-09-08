@@ -93,6 +93,24 @@ export async function pushInventoryOnHand(
             inventoryItemId: payload.inventoryItemId,
             locationId: payload.locationId,
             quantity: payload.quantity,
+            // `changeFromQuantity` is the compare-and-swap guard: Shopify
+            // applies the write only if the quantity it currently holds equals
+            // this number, and answers `CHANGE_FROM_QUANTITY_STALE` otherwise.
+            // Shopify requires the field to be *present*, and omitting it is an
+            // error rather than a default — so `null`, the documented way to
+            // skip the check, has to be written out.
+            //
+            // Skipping it is the deliberate choice here, not an oversight. The
+            // external system is the source of truth for this number (see the
+            // module comment), and the payload schema in `@nordlys/shared`
+            // carries no expected-previous value to compare against. The
+            // alternative — reading the current level first and passing it —
+            // buys nothing: between the read and the write the level can change
+            // anyway, and it would turn one call into two against a rate limit.
+            // The day an ERP event starts carrying the quantity it believed it
+            // was replacing, that value belongs here and the CAS check becomes
+            // worth having.
+            changeFromQuantity: null,
           },
         ],
       },
