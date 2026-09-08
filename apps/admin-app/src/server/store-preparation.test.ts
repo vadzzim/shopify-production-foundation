@@ -106,7 +106,10 @@ describe('prepareStoreAfterAuth', () => {
     expect(result).toBeUndefined();
     expect(log.error).toHaveBeenCalledWith(
       expect.stringContaining('Store preparation failed'),
-      expect.any(Error),
+      // The reason is carried as a named field rather than as a bare Error:
+      // pino serialises the structured half of a line, and an Error passed as
+      // the whole detail object logs as `{}`.
+      { error: 'Shopify refused the definition' },
     );
   });
 });

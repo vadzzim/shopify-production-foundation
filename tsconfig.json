@@ -6,5 +6,5 @@
   // Only the repository-root TypeScript files. Each workspace package has its
   // own config; this one exists so tooling has a project for the files that sit
   // outside them.
-  "include": ["vitest.config.ts"]
+  "include": ["vitest.config.ts", "vitest.setup.ts"]
 }
