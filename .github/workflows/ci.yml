@@ -17,40 +17,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The app does not exist yet — see "Repository state" in CLAUDE.md. Until
-      # package.json lands, the job reports success rather than failing on a
-      # missing manifest, and says so in the run summary. Delete this guard and
-      # the `if:` conditions below in the commit that adds package.json.
-      - id: manifest
-        run: |
-          if [ -f package.json ]; then
-            echo 'present=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'present=false' >> "$GITHUB_OUTPUT"
-            echo '::notice title=App checks skipped::No package.json in the repository yet.'
-          fi
-
       - uses: pnpm/action-setup@v4
-        if: steps.manifest.outputs.present == 'true'
         with:
           # Must match the major version of the lockfile format. Local pnpm is
           # 10.x; on 9 a v10 lockfile fails --frozen-lockfile.
           version: 10
       - uses: actions/setup-node@v4
-        if: steps.manifest.outputs.present == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - if: steps.manifest.outputs.present == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: steps.manifest.outputs.present == 'true'
-        run: pnpm typecheck
-      - if: steps.manifest.outputs.present == 'true'
-        run: pnpm lint
-      - if: steps.manifest.outputs.present == 'true'
-        run: pnpm test -- --coverage
+      # The root postinstall runs `prisma generate`, so @prisma/client is typed
+      # before typecheck. No database is needed for that — generation reads the
+      # schema file, not the server.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # `pnpm test -- --coverage` does not work here: pnpm 10 forwards the `--`
+      # to vitest, which reads both tokens as test-name filters and produces no
+      # coverage at all — quietly, with a green run. Hence a named script.
+      - run: pnpm test:coverage
       - uses: actions/upload-artifact@v4
-        if: always() && steps.manifest.outputs.present == 'true'
+        if: always()
         with:
           name: coverage
           path: coverage/
