@@ -179,12 +179,19 @@ export function createWorker(options: WorkerOptions): Worker {
   async function tick(): Promise<number> {
     if (ticksSinceReap >= REAP_EVERY_TICKS) {
       ticksSinceReap = 0;
-      const released = await reapStaleJobs(
+      const reaped = await reapStaleJobs(
         prisma,
         staleLockMs === undefined ? {} : { staleAfterMs: staleLockMs },
       );
-      if (released > 0) {
-        log.warn('Released jobs whose worker had gone away', { released });
+      if (reaped.released > 0 || reaped.dead > 0) {
+        // Reported together and distinguished: a released job is a redeploy at
+        // an awkward moment, while a dead-lettered one is a job that has now
+        // taken a worker down as many times as it is allowed to, which is a
+        // different thing to go and look at.
+        log.warn('Reaped jobs whose worker had gone away', {
+          released: reaped.released,
+          dead: reaped.dead,
+        });
       }
     }
     ticksSinceReap += 1;
