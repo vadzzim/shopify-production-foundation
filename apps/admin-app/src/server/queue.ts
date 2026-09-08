@@ -215,6 +215,14 @@ export async function claimJobs(
          FROM "Job" AS c
         WHERE c.status IN ('PENDING'::"JobStatus", 'FAILED'::"JobStatus")
           AND c."runAt" <= now()
+          -- The attempt budget, enforced at the point of handing work out.
+          -- failJob already refuses to schedule a retry past it, so this is a
+          -- second lock on the same door -- and the door a dead worker comes
+          -- through: nothing in this process runs after an OOM kill, so the
+          -- only account of that attempt is the incremented counter on the row.
+          -- A job claimed with its budget already spent cannot be stopped by
+          -- anything except this line.
+          AND c.attempts < c."maxAttempts"
         ORDER BY c."runAt" ASC
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED
@@ -366,40 +374,83 @@ export async function failJob(
   return exhausted ? 'dead' : 'retry_scheduled';
 }
 
+export interface ReapResult {
+  /** Rows put back on the queue, with attempts left to spend. */
+  released: number;
+  /** Rows that had already spent their budget and are now dead-lettered. */
+  dead: number;
+}
+
 /**
- * Put jobs whose worker disappeared back on the queue.
+ * Put jobs whose worker disappeared back on the queue — or dead-letter them.
  *
  * A process killed while holding a job leaves the row RUNNING with nobody
  * running it, and nothing else in this design would ever look at it again —
  * `claimJobs` only considers PENDING and FAILED. The reaper is what makes the
  * queue survive a redeploy at the wrong moment.
  *
- * Released rows keep their incremented `attempts`, so a job that reliably kills
- * its worker exhausts its budget and lands in the dead-letter state instead of
- * cycling forever.
+ * ## Why the attempt budget is checked here
  *
- * @returns how many rows were released.
+ * Released rows keep their incremented `attempts`, which is what makes a job
+ * that reliably kills its worker run out of budget rather than cycling. But
+ * running out has to be *noticed*, and this is the only place that can notice
+ * it. `failJob` is where a job is normally compared against its budget, and a
+ * worker that dies mid-job never reaches it: the process is gone. So a reaper
+ * that released every stale row unconditionally handed a job with
+ * `attempts == maxAttempts` straight back to `claimJobs`, which took it, ran it,
+ * and let it kill the worker again — forever, and with the sync log showing it
+ * as merely FAILED throughout.
+ *
+ * Two statements rather than one, because the outcomes differ in more than the
+ * status: a dead-lettered row gets `finishedAt` and no `runAt`, since nothing
+ * is going to run it. The comparison between two columns of the same row is
+ * `prisma.job.fields.maxAttempts` — a field reference, which Prisma renders
+ * into SQL as `attempts >= "maxAttempts"`. Doing it in application code would
+ * mean reading every stale row into this process to decide, and racing another
+ * reaper for each one.
  */
 export async function reapStaleJobs(
   prisma: PrismaClient,
   options: { staleAfterMs?: number; now?: () => Date } = {},
-): Promise<number> {
+): Promise<ReapResult> {
   const staleAfter = options.staleAfterMs ?? DEFAULT_STALE_LOCK_MS;
   const now = (options.now ?? (() => new Date()))();
   const cutoff = new Date(now.getTime() - staleAfter);
+  const reason = `Worker lock expired after ${String(staleAfter)}ms`;
+
+  // Out of budget first. Doing it in this order means the second statement's
+  // filter needs no help: these rows are no longer RUNNING by the time it runs.
+  const dead = await prisma.job.updateMany({
+    where: {
+      status: 'RUNNING',
+      lockedAt: { lt: cutoff },
+      attempts: { gte: prisma.job.fields.maxAttempts },
+    },
+    data: {
+      status: 'DEAD',
+      lockedAt: null,
+      lockedBy: null,
+      lastError: `${reason}; out of attempts, so it will not be retried.`,
+      finishedAt: now,
+    },
+  });
 
   const released = await prisma.job.updateMany({
-    where: { status: 'RUNNING', lockedAt: { lt: cutoff } },
+    where: {
+      status: 'RUNNING',
+      lockedAt: { lt: cutoff },
+      attempts: { lt: prisma.job.fields.maxAttempts },
+    },
     data: {
       status: 'FAILED',
       lockedAt: null,
       lockedBy: null,
-      lastError: `Worker lock expired after ${String(staleAfter)}ms; released for retry.`,
+      lastError: `${reason}; released for retry.`,
       runAt: now,
     },
   });
 
-  return released.count;
+  return { released: released.count, dead: dead.count };
 }
 
 /** Prisma's `JobStatus` enum ↔ the lower-case one the API and UI speak. */

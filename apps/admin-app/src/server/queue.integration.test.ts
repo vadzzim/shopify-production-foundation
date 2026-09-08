@@ -225,6 +225,27 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
       expect(again.id).toBe(id);
       expect(again.attempts).toBe(2);
     });
+
+    it('never claims a job whose attempts are already spent', async () => {
+      // The invariant, enforced where the work is handed out rather than only
+      // where a failure is recorded: a FAILED row that is out of budget is not
+      // runnable, however it came to be FAILED. `failJob` would have made such
+      // a row DEAD, so what this guards against is every other route to it — a
+      // reaper release, a row edited by hand, a `maxAttempts` lowered later.
+      const id = await enqueue(prisma, {
+        shop: SHOP,
+        kind: 'order.received',
+        payload: { topic: 'orders/create', body: {} },
+        correlationId: 'c1',
+      });
+
+      await prisma.job.update({
+        where: { id },
+        data: { status: 'FAILED', attempts: 5, maxAttempts: 5 },
+      });
+
+      expect(await claimJobs(prisma, 'worker-a', 1)).toEqual([]);
+    });
   });
 
   describe('failJob', () => {
@@ -298,15 +319,47 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
 
       // Nothing else in the design would ever look at this row again: claiming
       // only considers PENDING and FAILED.
-      const released = await reapStaleJobs(prisma);
-
-      expect(released).toBe(1);
+      expect(await reapStaleJobs(prisma)).toEqual({ released: 1, dead: 0 });
 
       const again = only(await claimJobs(prisma, 'worker-b', 1));
       expect(again.id).toBe(claimed.id);
       // The attempt the dead worker spent still counts, so a job that reliably
       // kills its worker ends up dead rather than cycling.
       expect(again.attempts).toBe(2);
+    });
+
+    it('dead-letters a stale job that has no attempts left', async () => {
+      // The case the reaper is the only place that can catch. A job that takes
+      // its worker down with it never runs `failJob`, so nothing else ever
+      // compares it against its budget: released unconditionally, it would be
+      // claimed, kill another worker, be released again, and keep the sync log
+      // showing FAILED forever.
+      await enqueue(prisma, {
+        shop: SHOP,
+        kind: 'order.received',
+        payload: { topic: 'orders/create', body: {} },
+        correlationId: 'c1',
+        maxAttempts: 1,
+      });
+
+      const claimed = only(await claimJobs(prisma, 'worker-a', 1));
+      expect(claimed.attempts).toBe(claimed.maxAttempts);
+
+      await prisma.job.update({
+        where: { id: claimed.id },
+        data: { lockedAt: new Date(Date.now() - 60 * 60 * 1000) },
+      });
+
+      expect(await reapStaleJobs(prisma)).toEqual({ released: 0, dead: 1 });
+
+      const row = await prisma.job.findFirstOrThrow({
+        where: { id: claimed.id },
+      });
+      expect(row.status).toBe('DEAD');
+      expect(row.finishedAt).not.toBeNull();
+      expect(row.lastError).toContain('out of attempts');
+
+      expect(await claimJobs(prisma, 'worker-b', 1)).toEqual([]);
     });
 
     it('leaves a freshly claimed job alone', async () => {
@@ -319,7 +372,10 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
 
       await claimJobs(prisma, 'worker-a', 1);
 
-      expect(await reapStaleJobs(prisma, { staleAfterMs: 60_000 })).toBe(0);
+      expect(await reapStaleJobs(prisma, { staleAfterMs: 60_000 })).toEqual({
+        released: 0,
+        dead: 0,
+      });
     });
   });
 });
