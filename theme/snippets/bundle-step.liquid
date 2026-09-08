@@ -93,6 +93,18 @@
           {%- endif -%}
         </span>
 
+        {%- if is_available -%}
+          {%- comment -%}
+            Decorative duplication of the radio's own state: the input already
+            reports "checked" to assistive technology, so this is
+            `aria-hidden` and carries the selection visually only. A sold-out
+            option cannot be checked, so it does not get one.
+          {%- endcomment -%}
+          <span class="bundle-builder__option-selected" aria-hidden="true">
+            {{- 'sections.bundle_builder.selected' | t -}}
+          </span>
+        {%- endif -%}
+
         <span class="bundle-builder__option-title">{{ step_product.title | escape }}</span>
 
         {%- if show_price -%}

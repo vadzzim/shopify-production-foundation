@@ -269,6 +269,7 @@
   "sections": {
     "bundle_builder": {
       "step_number": "Step {{ number }}",
+      "selected": "Selected",
       "sold_out": "Sold out",
       "adding": "Adding to cart…",
       "view_cart": "View cart",
