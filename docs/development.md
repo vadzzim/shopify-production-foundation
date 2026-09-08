@@ -118,11 +118,33 @@ phase 3 onwards this option stops being enough and a real tunnel is required;
 that is the point at which `--tunnel-url` with ngrok, or a working Cloudflare
 tunnel, becomes mandatory rather than a preference.
 
-On first run mkcert may ask to install its root certificate into the Windows
-trust store. Under WSL it installs into Linux only, and the Windows browser then
-shows a certificate error until the root CA is added manually — Shopify's
+##### `Localhost certificate and key are required at .shopify/localhost.pem`
+
+The CLI is supposed to fetch mkcert into `.shopify/` and issue the certificate
+itself. When it cannot — the download goes to GitHub, so a network that blocks
+the Cloudflare tunnel often blocks this too — the two files have to be made by
+hand. Names are not negotiable; they are what the CLI looks for.
+
+```bash
+scoop install mkcert          # or: winget install FiloSottile.mkcert
+mkcert -install
+mkcert -cert-file .shopify/localhost.pem -key-file .shopify/localhost-key.pem localhost 127.0.0.1 "::1"
+```
+
+`mkcert -install` adds a local root CA to the system trust stores, so it is a
+deliberate step to run yourself rather than something to automate away.
+
+**It is also not optional here.** The app is loaded in an iframe, and a browser
+does not offer the "proceed anyway" interstitial inside one — an untrusted
+certificate shows up as an empty or blocked frame with no explanation, which
+reads as a broken app rather than as a certificate problem. Under WSL, mkcert
+installs the CA into Linux only and the Windows browser keeps rejecting it until
+the root CA is added on the Windows side; Shopify's
 [networking options](https://shopify.dev/docs/apps/build/cli-for-apps/networking-options)
-page has the steps.
+page has those steps.
+
+`.shopify/` is gitignored, so these files stay local — as they should, being a
+certificate and its private key.
 
 #### Running the server without the CLI
 
