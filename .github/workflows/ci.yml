@@ -16,6 +16,23 @@ env:
   # after which an action still targeting it stops working rather than warning.
   NODE_VERSION: 24
 
+  # The two CLIs installed from npm at job time, pinned to exact versions.
+  #
+  # `@latest` would defeat the point of this repository: the same commit would
+  # be checked by a different tool every month, so a green run would say
+  # "this code passes today's theme-check" rather than "this code is correct",
+  # and a red one could not be told apart from a rule that did not exist when
+  # the commit was written.
+  #
+  # The cost of pinning is that a new theme-check rule or Lighthouse audit is
+  # not noticed until someone bumps these lines. That is the intended trade:
+  # tool drift arrives as a reviewable diff instead of as a failure on an
+  # unrelated pull request. SHOPIFY_CLI_VERSION is deliberately the version
+  # `docs/development.md` expects locally — CI checking the theme with a
+  # different CLI than the one that pushes it is how "works locally" starts.
+  SHOPIFY_CLI_VERSION: 4.7.1
+  LHCI_VERSION: 0.15.1
+
 jobs:
   app:
     name: App — typecheck, lint, test
@@ -93,7 +110,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm i -g @shopify/cli@latest
+      - run: npm i -g @shopify/cli@${{ env.SHOPIFY_CLI_VERSION }}
       - run: shopify theme check --path theme --fail-level error
 
   secrets:
@@ -123,7 +140,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run Lighthouse against the preview theme
         run: |
-          npx --yes @lhci/cli@latest autorun \
+          npx --yes @lhci/cli@${{ env.LHCI_VERSION }} autorun \
             --collect.url="${{ vars.PREVIEW_THEME_URL }}" \
             --collect.numberOfRuns=3 \
             --upload.target=filesystem \
