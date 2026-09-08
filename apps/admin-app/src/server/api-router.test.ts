@@ -217,3 +217,180 @@ describe('unknown endpoints', () => {
     });
   });
 });
+
+describe('PATCH /api/bundles/:id', () => {
+  it('names the field it refused rather than answering "invalid request"', async () => {
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prismaReturning([]), graphql))
+      .patch('/api/bundles/bundle_1')
+      .send({
+        items: [
+          { productGid: 'gid://shopify/Product/1', routineStep: 'cleanse' },
+          { productGid: 'gid://shopify/Product/2', routineStep: 'treat' },
+        ],
+      })
+      .expect(422);
+
+    expect(response.body.error.code).toBe('validation');
+    expect(response.body.error.detail.join(' ')).toContain('items');
+    expect(response.body.error.detail.join(' ')).toContain('moisturize');
+  });
+
+  it('refuses a body that changes nothing', async () => {
+    // A 200 here would tell the caller a change was applied.
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    await request(appWith(prismaReturning([]), graphql))
+      .patch('/api/bundles/bundle_1')
+      .send({})
+      .expect(422);
+  });
+
+  it('answers 404 for an id this shop does not have', async () => {
+    const prisma = {
+      bundle: { findFirst: async () => null },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prisma, graphql))
+      .patch('/api/bundles/bundle_1')
+      .send({ title: 'Mine now' })
+      .expect(404);
+
+    // Not 403, and the message does not say whether the row exists elsewhere:
+    // "that id exists, just not for you" is a cross-tenant disclosure.
+    expect(response.body.error.code).toBe('not_found');
+  });
+
+  it('returns the updated set, with titles read live', async () => {
+    const stored = {
+      ...bundleRow,
+      items: [
+        ...bundleRow.items,
+        {
+          id: 'item_3',
+          bundleId: 'bundle_1',
+          productGid: 'gid://shopify/Product/3',
+          routineStep: 'MOISTURIZE' as const,
+          position: 2,
+        },
+      ],
+    };
+
+    const prisma = {
+      bundle: {
+        findFirst: async () => stored,
+        update: async () => ({ ...stored, title: 'Nordic winter routine' }),
+      },
+      bundleItem: { deleteMany: async () => ({ count: 3 }) },
+      $transaction: async (run: (tx: unknown) => Promise<unknown>) =>
+        run(prisma),
+    } as unknown as PrismaClient;
+
+    const graphql: AdminGraphql = async () => ({
+      data: {
+        nodes: [
+          {
+            id: 'gid://shopify/Product/1',
+            title: 'Fjord Cleansing Balm',
+            status: 'ACTIVE',
+            routineStep: { value: 'cleanse' },
+          },
+          {
+            id: 'gid://shopify/Product/2',
+            title: 'Cloudberry Bright Serum',
+            status: 'ACTIVE',
+            routineStep: { value: 'treat' },
+          },
+          {
+            id: 'gid://shopify/Product/3',
+            title: 'Birch Sap Cream',
+            status: 'ACTIVE',
+            routineStep: { value: 'moisturize' },
+          },
+        ],
+      } as never,
+    });
+
+    const response = await request(appWith(prisma, graphql))
+      .patch('/api/bundles/bundle_1')
+      .send({ title: 'Nordic winter routine' })
+      .expect(200);
+
+    expect(response.body.bundle).toMatchObject({
+      title: 'Nordic winter routine',
+      items: [
+        { routineStep: 'cleanse', title: 'Fjord Cleansing Balm' },
+        { routineStep: 'treat', title: 'Cloudberry Bright Serum' },
+        { routineStep: 'moisturize', title: 'Birch Sap Cream' },
+      ],
+    });
+  });
+});
+
+describe('DELETE /api/bundles/:id', () => {
+  it('answers 204 with no body', async () => {
+    const prisma = {
+      bundle: { deleteMany: async () => ({ count: 1 }) },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prisma, graphql))
+      .delete('/api/bundles/bundle_1')
+      .expect(204);
+
+    expect(response.body).toEqual({});
+  });
+
+  it('answers 404 when the delete matched nothing', async () => {
+    const prisma = {
+      bundle: { deleteMany: async () => ({ count: 0 }) },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    await request(appWith(prisma, graphql))
+      .delete('/api/bundles/bundle_1')
+      .expect(404);
+  });
+});
+
+describe('GET /api/catalog/candidates', () => {
+  it('returns the products per step, and says whether the list is complete', async () => {
+    const graphql: AdminGraphql = async () => ({
+      data: {
+        products: {
+          nodes: [
+            {
+              id: 'gid://shopify/Product/1',
+              title: 'Fjord Cleansing Balm',
+              status: 'ACTIVE',
+              routineStep: { value: 'cleanse' },
+            },
+            {
+              id: 'gid://shopify/Product/9',
+              title: 'Unassigned Product',
+              status: 'ACTIVE',
+              routineStep: null,
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      } as never,
+    });
+
+    const response = await request(appWith(prismaReturning([]), graphql))
+      .get('/api/catalog/candidates')
+      .expect(200);
+
+    expect(response.body.candidates).toEqual([
+      {
+        productGid: 'gid://shopify/Product/1',
+        title: 'Fjord Cleansing Balm',
+        routineStep: 'cleanse',
+        productStatus: 'ACTIVE',
+      },
+    ]);
+    expect(response.body).toMatchObject({ scanned: 2, exhausted: true });
+  });
+});
