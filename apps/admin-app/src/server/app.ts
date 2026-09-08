@@ -9,6 +9,7 @@ import { prisma } from './db';
 import { env } from './env';
 import { logger } from './logger';
 import { adminGraphqlFor, shopify } from './shopify';
+import { createWebhookRouter } from './webhook-router';
 
 /**
  * One Express app serves the API and the embedded screen.
@@ -67,6 +68,27 @@ export async function createApp(): Promise<Express> {
     shopify.config.auth.callbackPath,
     shopify.auth.callback(),
     shopify.redirectToShopifyOrAppRoot(),
+  );
+
+  /**
+   * Webhooks, mounted **before** the authenticated router below.
+   *
+   * Order is the whole point. `/api/webhooks` sits under `/api`, so left later
+   * in the chain it would be matched by `validateAuthenticatedSession()` first
+   * — and a webhook carries no session token, so every delivery would be
+   * answered with a redirect to OAuth. Shopify would read that as a failure and
+   * retry it, forever, and the app would look like it was simply not receiving
+   * webhooks.
+   *
+   * It also has to be before `express.json()` — which the API router installs
+   * on itself — because the HMAC is computed over the bytes Shopify signed, and
+   * a body that has been through `JSON.parse` cannot be turned back into them.
+   * The raw parser is scoped to this route only, so the rest of the app still
+   * gets parsed JSON.
+   */
+  app.use(
+    shopify.config.webhooks.path,
+    createWebhookRouter({ prisma, secret: env.SHOPIFY_API_SECRET }),
   );
 
   // Everything else under /api needs a verified session token. Mounted as a

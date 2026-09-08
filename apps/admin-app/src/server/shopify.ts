@@ -38,10 +38,19 @@ export const shopify = shopifyApp({
     callbackPath: '/api/auth/callback',
   },
   webhooks: {
-    // Declared because the config requires it. No handler is mounted yet:
-    // HMAC verification, idempotency and the queue are phase 3, and an endpoint
-    // that accepts webhooks before it can process them idempotently would drop
-    // deliveries silently.
+    /**
+     * The path Shopify posts to. It matches `uri` in the
+     * `[[webhooks.subscriptions]]` block of `shopify.app.toml`, and a test
+     * asserts the two agree.
+     *
+     * `shopify.processWebhooks()` is deliberately **not** used to serve it. The
+     * receiver in `webhook-router.ts` is mounted there instead, because the
+     * adapter's middleware verifies the HMAC over a decoded string rather than
+     * the raw `Buffer`, compares with a hand-written loop rather than
+     * `crypto.timingSafeEqual`, and writes its response only after every
+     * handler has finished — three requirements of rule 3, in one function.
+     * The evidence and the trade-off are in ADR-0016.
+     */
     path: '/api/webhooks',
   },
   /**
@@ -112,4 +121,26 @@ export function adminGraphqlFor(session: Session): AdminGraphql {
 async function loadOfflineSession(shop: string): Promise<Session | undefined> {
   const offlineId = shopify.api.session.getOfflineId(shop);
   return shopify.config.sessionStorage.loadSession(offlineId);
+}
+
+/**
+ * An Admin API client for a shop, on its offline token.
+ *
+ * This is what background work runs under. A job is executed when the queue
+ * reaches it, which is routinely long after the staff member who caused it
+ * closed the tab and their online token expired with their admin session; a
+ * worker holding an online token would fail on exactly the deliveries that
+ * arrive out of hours.
+ */
+export async function offlineGraphqlFor(shop: string): Promise<AdminGraphql> {
+  const session = await loadOfflineSession(shop);
+
+  if (!session) {
+    // The app is not installed on this shop, or the session row is gone. Not a
+    // transient failure, so it says so plainly rather than letting the queue
+    // retry it five times against a shop that has uninstalled.
+    throw new Error(`No offline session stored for ${shop}.`);
+  }
+
+  return adminGraphqlFor(session);
 }
