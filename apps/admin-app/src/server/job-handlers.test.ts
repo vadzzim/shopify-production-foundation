@@ -379,22 +379,55 @@ describe('compliance.request', () => {
     expect(context.lines.some((line) => line.level === 'info')).toBe(true);
   });
 
-  it('answers a customer redaction request with nothing to redact', async () => {
+  it('clears the queued jobs that name the customer on customers/redact', async () => {
+    // The only thing this schema retains about a customer is the id on their
+    // own earlier compliance requests, sitting in `Job.payload`. Nothing
+    // cascades to that table, so if this handler does not delete those rows
+    // nothing ever does, and a request answered "nothing to redact" leaves the
+    // customer id in the database it claimed to have cleared.
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
+
     const context = contextFor(
       jobFor('compliance.request', {
         topic: 'customers/redact',
         body: { shop_domain: SHOP, customer: { id: 191167 } },
       }),
-      {},
+      { job: { deleteMany } },
     );
 
-    await expect(handler(context)).resolves.toBeUndefined();
+    await handler(context);
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        shop: SHOP,
+        // Its own row survives: the worker marks it SUCCEEDED after this
+        // returns, and that update fails on a row that is gone.
+        id: { not: 'job-1' },
+        payload: { path: ['body', 'customer', 'id'], equals: 191167 },
+      },
+    });
+  });
+
+  it('refuses a redaction request that names no customer', async () => {
+    // Nothing to act on and nothing a retry improves. The dead-letter state is
+    // where an undischargeable compliance request should end up, because it is
+    // the one place a person looks.
+    const context = contextFor(
+      jobFor('compliance.request', {
+        topic: 'customers/redact',
+        body: { shop_domain: SHOP },
+      }),
+      { job: { deleteMany: async () => ({ count: 0 }) } },
+    );
+
+    await expect(handler(context)).rejects.toBeInstanceOf(PermanentJobError);
   });
 
   it('deletes everything for the shop on shop/redact', async () => {
     const bundle = vi.fn(async () => ({ count: 3 }));
     const session = vi.fn(async () => ({ count: 2 }));
     const webhookDelivery = vi.fn(async () => ({ count: 9 }));
+    const job = vi.fn(async () => ({ count: 4 }));
 
     const context = contextFor(
       jobFor('compliance.request', {
@@ -405,6 +438,7 @@ describe('compliance.request', () => {
         bundle: { deleteMany: bundle },
         session: { deleteMany: session },
         webhookDelivery: { deleteMany: webhookDelivery },
+        job: { deleteMany: job },
       },
     );
 
@@ -413,6 +447,11 @@ describe('compliance.request', () => {
     for (const spy of [bundle, session, webhookDelivery]) {
       expect(spy).toHaveBeenCalledWith({ where: { shop: SHOP } });
     }
+
+    // The queue is included in the erasure, minus the row performing it.
+    expect(job).toHaveBeenCalledWith({
+      where: { shop: SHOP, id: { not: 'job-1' } },
+    });
   });
 });
 
