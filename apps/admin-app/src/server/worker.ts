@@ -2,14 +2,22 @@ import { randomUUID } from 'node:crypto';
 
 import type { PrismaClient } from '@prisma/client';
 
+import type { JobKind } from '@nordlys/shared';
+
 import type { AdminGraphql } from './admin-graphql';
-import { JOB_HANDLERS, PermanentJobError } from './job-handlers';
+import {
+  JOB_HANDLERS,
+  PermanentJobError,
+  RetryLaterError,
+  type JobHandler,
+} from './job-handlers';
 import type { Logger } from './logger';
 import {
   claimJobs,
   completeJob,
   failJob,
   reapStaleJobs,
+  rescheduleJob,
   type QueueJob,
 } from './queue';
 
@@ -45,6 +53,14 @@ export interface WorkerOptions {
   staleLockMs?: number;
   /** Injected for tests; the real one is `setTimeout`. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * What to run for each kind. Defaults to every handler this deploy ships.
+   *
+   * Overridable so the loop can be tested for what *it* does with a handler's
+   * outcome — succeeded, failed, waiting — without standing up the work the
+   * real handler would do to get there.
+   */
+  handlers?: Record<JobKind, JobHandler>;
 }
 
 export interface Worker {
@@ -80,6 +96,7 @@ export function createWorker(options: WorkerOptions): Worker {
     batchSize = 5,
     staleLockMs,
     sleep = defaultSleep,
+    handlers = JOB_HANDLERS,
   } = options;
 
   // Identifies which process holds a claim. Useful the moment there is more
@@ -102,9 +119,7 @@ export function createWorker(options: WorkerOptions): Worker {
       attempt: job.attempts,
     });
 
-    const handler = JOB_HANDLERS[job.kind] as
-      | (typeof JOB_HANDLERS)[keyof typeof JOB_HANDLERS]
-      | undefined;
+    const handler = handlers[job.kind] as JobHandler | undefined;
 
     if (!handler) {
       // A kind written by a newer deploy, or by hand. Retrying cannot conjure
@@ -125,6 +140,20 @@ export function createWorker(options: WorkerOptions): Worker {
       await completeJob(prisma, job.id);
       jobLog.info('Job succeeded', { durationMs: Date.now() - startedAt });
     } catch (error) {
+      if (error instanceof RetryLaterError) {
+        // Waiting on something outside this process, not failing. The row goes
+        // back to PENDING with its attempt returned, so a slow bulk operation
+        // cannot exhaust an attempt budget meant for failures — and the sync
+        // log does not show a red row for work that is going fine.
+        await rescheduleJob(prisma, job.id, error.runAt);
+        jobLog.info('Job is waiting; rescheduled', {
+          durationMs: Date.now() - startedAt,
+          runAt: error.runAt.toISOString(),
+          reason: error.message,
+        });
+        return;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
 
       // A permanent failure skips the remaining attempts by presenting the job

@@ -257,6 +257,38 @@ export async function completeJob(
   });
 }
 
+/**
+ * Put a job back on the queue **without** counting the claim as an attempt.
+ *
+ * This is not a failure path. It exists for work that is waiting on something
+ * outside this process — today the catalog export, which polls a bulk operation
+ * Shopify runs on its own schedule. Recording that as a failure would put a job
+ * that is progressing normally in front of the merchant with a red badge and an
+ * error message invented to fill `lastError`.
+ *
+ * The attempt is given back deliberately. `claimJobs` counts attempts on claim,
+ * because a worker killed mid-job never runs its failure path — but a poll that
+ * found "still running" *did* run its path, and it is not one of the failures
+ * the attempt budget is there to bound. Without the decrement a slow export
+ * would exhaust its budget by succeeding at waiting.
+ */
+export async function rescheduleJob(
+  prisma: PrismaClient,
+  jobId: string,
+  runAt: Date,
+): Promise<void> {
+  await prisma.job.update({
+    where: { id: jobId },
+    data: {
+      status: 'PENDING',
+      runAt,
+      lockedAt: null,
+      lockedBy: null,
+      attempts: { decrement: 1 },
+    },
+  });
+}
+
 export interface BackoffOptions {
   baseMs?: number;
   maxMs?: number;

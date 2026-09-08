@@ -394,3 +394,107 @@ describe('GET /api/catalog/candidates', () => {
     expect(response.body).toMatchObject({ scanned: 2, exhausted: true });
   });
 });
+
+describe('the catalog export endpoints', () => {
+  const jobRow = {
+    id: 'job_1',
+    kind: 'catalog.export',
+    status: 'SUCCEEDED',
+    attempts: 2,
+    maxAttempts: 10,
+    runAt: new Date('2026-09-08T12:00:00.000Z'),
+    createdAt: new Date('2026-09-08T11:59:00.000Z'),
+    finishedAt: new Date('2026-09-08T12:00:30.000Z'),
+    lastError: null,
+    correlationId: 'ui-1',
+    payload: {},
+  };
+
+  const report = {
+    bulkOperationId: 'gid://shopify/BulkOperation/1',
+    objectCount: 3,
+    byStep: { cleanse: 1, treat: 1, moisturize: 0 },
+    withoutStep: 1,
+    unrecognisedSteps: [],
+    sampleWithoutStep: [
+      { productGid: 'gid://shopify/Product/9', title: 'Unassigned Product' },
+    ],
+    completedAt: '2026-09-08T12:00:30.000Z',
+  };
+
+  it('answers with nulls for a store that has never exported', async () => {
+    const prisma = {
+      job: { findFirst: async () => null },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prisma, graphql))
+      .get('/api/catalog/export')
+      .expect(200);
+
+    expect(response.body).toEqual({ job: null, report: null });
+  });
+
+  it('returns the newest run together with the newest report', async () => {
+    // Deliberately different rows: a merchant who has just started a new export
+    // should still be able to read the numbers from the last one that finished.
+    const prisma = {
+      job: {
+        findFirst: async ({ where }: { where: { result?: unknown } }) =>
+          where.result === undefined
+            ? { ...jobRow, id: 'job_2', status: 'RUNNING' }
+            : { result: report },
+      },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prisma, graphql))
+      .get('/api/catalog/export')
+      .expect(200);
+
+    expect(response.body.job).toMatchObject({ id: 'job_2', status: 'running' });
+    expect(response.body.report).toMatchObject({ objectCount: 3 });
+  });
+
+  it('treats a stored report of an older shape as no report', async () => {
+    // The column is jsonb, so what is in it was written by some deploy of this
+    // app, not necessarily this one.
+    const prisma = {
+      job: {
+        findFirst: async ({ where }: { where: { result?: unknown } }) =>
+          where.result === undefined
+            ? jobRow
+            : { result: { objectCount: 'three' } },
+      },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prisma, graphql))
+      .get('/api/catalog/export')
+      .expect(200);
+
+    expect(response.body.report).toBeNull();
+    expect(response.body.job).not.toBeNull();
+  });
+
+  it('answers 202 and does not queue a second export while one is running', async () => {
+    const created: unknown[] = [];
+    const prisma = {
+      job: {
+        findFirst: async () => ({ ...jobRow, status: 'RUNNING' }),
+        create: async ({ data }: { data: unknown }) => {
+          created.push(data);
+          return { id: 'job_new' };
+        },
+      },
+    } as unknown as PrismaClient;
+    const graphql: AdminGraphql = async () => ({ data: {} as never });
+
+    const response = await request(appWith(prisma, graphql))
+      .post('/api/catalog/export')
+      .expect(202);
+
+    expect(created).toHaveLength(0);
+    expect(response.body.job).toMatchObject({ status: 'running' });
+  });
+});
