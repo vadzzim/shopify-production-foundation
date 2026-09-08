@@ -28,3 +28,22 @@ export {
   type StoreSetupReport,
   type ApiError,
 } from './bundle';
+export {
+  WEBHOOK_TOPICS,
+  COMPLIANCE_TOPICS,
+  JOB_KINDS,
+  webhookTopicSchema,
+  jobKindSchema,
+  jobStatusSchema,
+  webhookJobPayloadSchema,
+  inventoryPushPayloadSchema,
+  jobSummarySchema,
+  jobListResponseSchema,
+  type WebhookTopic,
+  type JobKind,
+  type JobStatus,
+  type WebhookJobPayload,
+  type InventoryPushPayload,
+  type JobSummary,
+  type JobListResponse,
+} from './jobs';
