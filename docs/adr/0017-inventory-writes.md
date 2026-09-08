@@ -114,6 +114,40 @@ It is the only one of the three that draws the line where the domain draws it.
 It also means the boundary is legible: "the same job" and "the same write" are
 the same sentence.
 
+## Decision 5 — the compare-and-swap check is skipped, explicitly
+
+`InventoryQuantityInput.changeFromQuantity` is the compare-and-swap guard: give
+it the quantity you believe Shopify currently holds, and the write applies only
+if that is still true, failing with `CHANGE_FROM_QUANTITY_STALE` otherwise.
+Shopify documents the field as **mandatory even when the check is unwanted** —
+`null` skips it, and omitting the key altogether makes the mutation return an
+error. There is no `ignoreCompareQuantity` on this input in 2026-07; that was on
+an earlier shape of the mutation. Both confirmed through the Shopify Dev MCP.
+
+So the field has to be written out, and its value is a decision:
+
+- **Pass the quantity the ERP believed it was replacing.** The real
+  compare-and-swap, and the right answer *if the event carries that number*. The
+  payload schema in `@nordlys/shared` has no such field, because the events this
+  app is designed against (roadmap v2's mock ERP) state a level rather than a
+  transition.
+- **Read the current level from Shopify first, and pass that.** Looks like
+  safety and is not: the read and the write are two calls, the level can change
+  between them, and the check then passes on a number that was true a moment
+  ago. It also doubles the rate-limit cost of every push.
+- **`null`, deliberately.** The external system is the source of truth for this
+  number (Decision 2 and 3), and the write is absolute, so a concurrent change
+  in the admin is meant to be overwritten — that is what "the ERP owns stock"
+  means.
+
+**Decision: `null`, with the reasoning at the call site.**
+
+Shopify's own guidance is to use `null` only when your system is the source of
+truth for that inventory, which is exactly the case this app is built for. The
+one thing not to do is leave the field out, which is what the code did until
+2026-09-08: every push was rejected, and the mocked client in the unit tests had
+no way to notice.
+
 ## Consequences
 
 - `SET_INVENTORY_ON_HAND` in `graphql-documents.ts` is validated against 2026-07
@@ -126,6 +160,9 @@ the same sentence.
   means "already correct" — each one means the number was not written, and
   reporting success would leave the app believing a stock level Shopify does not
   have.
+- A test asserts that `changeFromQuantity` is *present* in the mutation
+  variables, not merely that it is null: an absent key reads as `undefined`, so
+  an assertion on the value alone passes while the mutation stays broken.
 - The producer of these jobs is still missing. The mock ERP is roadmap v2, so
   today `inventory.push` is enqueued only by hand. The handler, the mutation and
   the retry semantics are real and tested; the thing that would call them is not
@@ -138,3 +175,6 @@ the same sentence.
 - Shopify removes `inventorySetOnHandQuantities` → nothing to do; already off it.
 - The reference store gains a second location → nothing to change in the code,
   and this ADR is the note explaining why.
+- An ERP event starts carrying the quantity it believed it was replacing → that
+  value belongs in `changeFromQuantity`, and Decision 5 becomes a real
+  compare-and-swap rather than a documented opt-out.

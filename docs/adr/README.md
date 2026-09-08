@@ -27,3 +27,5 @@ in showing which alternatives were on the table and what was known at the time.
 | [0015](0015-polaris-web-components-over-polaris-react.md) | Polaris web components, not Polaris React | accepted |
 | [0016](0016-webhook-ingestion.md) | App-specific webhook subscriptions, own HMAC verification | accepted |
 | [0017](0017-inventory-writes.md) | `inventorySetQuantities`, absolute, keyed by job id | accepted |
+| [0018](0018-webhook-payload-minimisation.md) | Webhook payloads projected before storage; the queue is redactable | accepted |
+| [0019](0019-job-claim-ownership.md) | Job transitions conditioned on the claim, not the id | accepted |

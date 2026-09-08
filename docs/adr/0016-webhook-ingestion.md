@@ -142,18 +142,24 @@ ask for rather than in how they are received: acknowledged immediately, recorded
 and then discharged.
 
 What each means for this app follows from what it stores, and that is worth
-stating plainly: **there is no customer personal data in this database.** The
-schema holds OAuth sessions (staff, not customers), bundle definitions, webhook
-delivery ids and job rows.
+stating plainly: **no table here is keyed to a customer.** The schema holds OAuth
+sessions (staff, not customers), bundle definitions, webhook delivery ids and job
+rows.
 
 - `customers/data_request` — nothing to gather. Logged and answered.
-- `customers/redact` — nothing to erase. Logged and answered.
+- `customers/redact` — the earlier compliance requests naming that customer,
+  deleted from the queue. Nothing else about them is stored.
 - `shop/redact` — the instruction to erase, and the one that deletes: bundles,
-  sessions and delivery records for that shop.
+  sessions, delivery records and the queued jobs for that shop.
 
-The first two are only a defensible answer while the premise holds, so
-`job-handlers.test.ts` asserts it rather than trusting it: add a table keyed to a
-customer and the test fails here, rather than during an app review.
+**Superseded in part by ADR-0018.** As first written, this section said the first
+two topics had nothing at all to act on, and that a test asserted the premise.
+Both were wrong: `Job.payload` held the delivery body verbatim, so order jobs
+carried customer names, emails and addresses, and no such test existed. ADR-0018
+is the decision that makes the claim true — deliveries are projected onto the
+fields their handler reads before they are stored — and puts the queue inside
+both redaction paths. The premise is asserted now, by
+`webhook-payload.test.ts` and `job-handlers.integration.test.ts`.
 
 This is also why `app/uninstalled` deliberately does **not** delete bundles.
 Uninstalling is not a request to be forgotten — a merchant who reinstalls next
