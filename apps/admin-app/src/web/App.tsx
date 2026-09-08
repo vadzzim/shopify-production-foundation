@@ -14,6 +14,7 @@ import {
   prepareStore,
 } from './api';
 import { BundleEditor } from './BundleEditor';
+import { CatalogReport } from './CatalogReport';
 import { SyncLog } from './SyncLog';
 
 /**
@@ -325,6 +326,8 @@ export function App(): React.JSX.Element {
         show what I just changed", which is a question asked while looking at
         this screen.
       */}
+      <CatalogReport />
+
       <SyncLog />
 
       {/*

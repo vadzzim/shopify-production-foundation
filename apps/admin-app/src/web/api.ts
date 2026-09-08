@@ -3,12 +3,14 @@ import {
   bundleListResponseSchema,
   bundleSchema,
   catalogCandidatesSchema,
+  catalogExportStatusSchema,
   jobListResponseSchema,
   jobSummarySchema,
   storeSetupReportSchema,
   type Bundle,
   type BundleUpdate,
   type CatalogCandidates,
+  type CatalogExportStatus,
   type JobSummary,
   type StoreSetupReport,
 } from '@nordlys/shared';
@@ -163,6 +165,23 @@ export async function deleteBundle(id: string): Promise<void> {
 
 export async function fetchCandidates(): Promise<CatalogCandidates> {
   return request('/api/catalog/candidates', catalogCandidatesSchema);
+}
+
+export async function fetchCatalogExport(): Promise<CatalogExportStatus> {
+  return request('/api/catalog/export', catalogExportStatusSchema);
+}
+
+/**
+ * Ask for a catalog export.
+ *
+ * Returns the queued job rather than a report: a bulk operation finishes
+ * minutes later, so what comes back is "this is now running" and the screen
+ * finds out how it went by asking again.
+ */
+export async function startCatalogExport(): Promise<CatalogExportStatus> {
+  return request('/api/catalog/export', catalogExportStatusSchema, {
+    method: 'POST',
+  });
 }
 
 export async function prepareStore(): Promise<StoreSetupReport> {
