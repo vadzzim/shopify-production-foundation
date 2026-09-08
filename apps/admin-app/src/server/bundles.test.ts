@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 
 import type { AdminGraphql } from './admin-graphql';
@@ -97,24 +97,51 @@ interface CreateArgs {
   };
 }
 
-function fakePrisma(): PrismaClient {
+/**
+ * A database holding routine sets with the given handles.
+ *
+ * The handles are what the insert has to work around, so they are the only
+ * thing the fake stores about the existing rows: `create` refuses one that is
+ * already there the way the unique index on `(shop, handle)` does.
+ */
+function fakePrisma(
+  handles: readonly string[] = [],
+  /**
+   * Handles the read does not see but the insert still refuses.
+   *
+   * The concurrent case: another request claimed the handle after this one read
+   * the shop's rows, so the unique index is the only thing that knows.
+   */
+  claimedElsewhere: readonly string[] = [],
+): PrismaClient {
+  const taken = new Set([...handles, ...claimedElsewhere]);
+
   return {
     bundle: {
-      count: async () => 0,
-      create: async ({ data }: CreateArgs) => ({
-        id: 'bundle_1',
-        shop: data.shop,
-        title: data.title,
-        handle: data.handle,
-        status: 'DRAFT',
-        createdAt: new Date('2026-09-08T00:00:00.000Z'),
-        updatedAt: new Date('2026-09-08T00:00:00.000Z'),
-        items: data.items.create.map((item, index) => ({
-          id: `item_${index}`,
-          bundleId: 'bundle_1',
-          ...item,
-        })),
-      }),
+      findMany: async () => handles.map((handle) => ({ handle })),
+      create: async ({ data }: CreateArgs) => {
+        if (taken.has(data.handle)) {
+          throw new Prisma.PrismaClientKnownRequestError('handle taken', {
+            code: 'P2002',
+            clientVersion: 'test',
+          });
+        }
+
+        return {
+          id: 'bundle_1',
+          shop: data.shop,
+          title: data.title,
+          handle: data.handle,
+          status: 'DRAFT',
+          createdAt: new Date('2026-09-08T00:00:00.000Z'),
+          updatedAt: new Date('2026-09-08T00:00:00.000Z'),
+          items: data.items.create.map((item, index) => ({
+            id: `item_${index}`,
+            bundleId: 'bundle_1',
+            ...item,
+          })),
+        };
+      },
     },
   } as unknown as PrismaClient;
 }
@@ -164,6 +191,62 @@ describe('createStarterBundle', () => {
     expect(
       calls.some((call) => call.document.includes('BundleProducts')),
     ).toBe(false);
+  });
+
+  it('numbers the handle past the highest one in use, not past the row count', async () => {
+    // The bug this pins: the number came from the row count, so a shop that
+    // created sets 1 to 21 and deleted the first ten had eleven rows and
+    // handles 12 to 21. Every candidate the count suggested was taken, and the
+    // create failed however many times the merchant pressed the button.
+    const handles = Array.from({ length: 10 }, (_, index) =>
+      `routine-set-${String(index + 12)}`,
+    );
+    const { graphql } = fakeCatalog([fullFirstPage]);
+
+    const bundle = await createStarterBundle(
+      fakePrisma(handles),
+      graphql,
+      SHOP,
+      noWait,
+    );
+
+    expect(bundle.handle).toBe('routine-set-22');
+    // A number is never reused, which is also what a merchant expects of a URL
+    // that used to be a different routine set.
+    expect(bundle.title).toBe('Routine set 22');
+  });
+
+  it('ignores handles that are not part of the numbering', async () => {
+    // A handle renamed by hand, or written by a future scheme. Skipped rather
+    // than parsed into whatever `Number` makes of it.
+    const { graphql } = fakeCatalog([fullFirstPage]);
+
+    const bundle = await createStarterBundle(
+      fakePrisma(['morning-routine', 'routine-set-3-copy', 'routine-set-4']),
+      graphql,
+      SHOP,
+      noWait,
+    );
+
+    expect(bundle.handle).toBe('routine-set-5');
+  });
+
+  it('takes the next free handle when one is claimed under it', async () => {
+    // Two merchants pressing the button at once: the first insert wins the
+    // handle and the second gets P2002 from the unique index, which is the
+    // check (rule 10). The retry walks on rather than reporting a failure.
+    const { graphql } = fakeCatalog([fullFirstPage]);
+
+    const bundle = await createStarterBundle(
+      // Nothing to read — the racing insert had not committed when this request
+      // looked — and `routine-set-1` refused on write.
+      fakePrisma([], ['routine-set-1']),
+      graphql,
+      SHOP,
+      noWait,
+    );
+
+    expect(bundle.handle).toBe('routine-set-2');
   });
 
   it('stops paging as soon as every step is filled', async () => {
