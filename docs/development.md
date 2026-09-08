@@ -38,29 +38,77 @@ shopify theme dev --path theme --store $SHOPIFY_STORE   # hot reload
 is not committed to config — a stable HTTPS URL is only needed for a deployment,
 see ADR-0008.
 
-### The app is embedded, so `pnpm dev` alone shows nothing
+### The app is embedded: `http://localhost:3000` will never show it
 
-The server serves both halves on one port: the JSON API under `/api`, and the
-React screen. Vite runs as Express middleware in development, so there is no
-second dev port — an embedded app is framed at a single URL, and anything on
-another origin is unreachable from inside the admin iframe.
+`No shop provided` with a 400 is the install check working, not a fault. The
+server serves both halves on one port — the JSON API under `/api` and the React
+screen, with Vite as Express middleware — because an embedded app is framed at a
+single URL and anything on another origin is unreachable from inside the admin
+iframe. Opened directly there is no `?shop=`, so `ensureInstalledOnShop` has
+nothing to check, and even with one the browser would refuse to frame an
+`http://` page inside the HTTPS admin as mixed content.
 
-Opening `http://localhost:3000/` directly answers **400**. That is correct
-behaviour, not a fault: `ensureInstalledOnShop` has no `shop` to check. The app
-is only meaningful inside the admin, which needs three things in place:
+So the app needs an app record in the dashboard and an HTTPS tunnel. Shopify CLI
+provides both.
 
-1. An app in the Partner dashboard, which is what supplies `SHOPIFY_API_KEY` and
-   `SHOPIFY_API_SECRET`. `shopify app init` creates one, interactively.
-2. `SHOPIFY_APP_URL` set to the tunnel `shopify app dev` prints, with the app's
-   URL and callback URL in the Partner dashboard matching it.
-3. The scopes in `.env` matching the app's configuration — including
-   `read_metaobject_definitions` and `write_metaobject_definitions`, which the
-   install step needs to create the `ingredient` metaobject definition.
+#### First time: link the app
 
-Store preparation runs by itself after OAuth, on the offline session, and is
-idempotent — Shopify's `TAKEN` user error is treated as "already there". The
-**Prepare store** button on the bundle screen runs the same code on demand, and
-shows what Shopify refused if anything failed.
+**Do not run `shopify app init`.** It scaffolds a *new* project from Shopify's
+React Router template — see [ADR-0002](adr/0002-express-over-the-app-template.md)
+for why this app is not that — and in this repository it would build a second
+app beside the real one.
+
+`shopify.app.toml` and `apps/admin-app/shopify.web.toml` are already written.
+What is missing is the `client_id`, which identifies one app in one
+organisation. `config link` creates or picks the app and fills it in:
+
+```bash
+shopify app config link
+```
+
+#### Every time: run it
+
+```bash
+docker compose up -d          # the database still has to be up
+shopify app dev
+```
+
+`shopify app dev` opens the tunnel, updates the app URL and callback URL in the
+dashboard (`automatically_update_urls_on_dev = true`, because the tunnel URL is
+ephemeral), runs `pnpm dev` in `apps/admin-app`, and prints a link that installs
+the app on the store you choose.
+
+**It also supplies the credentials.** The CLI injects `SHOPIFY_API_KEY`,
+`SHOPIFY_API_SECRET`, `HOST` (the tunnel URL), `SCOPES` and `PORT` into the app
+process. `HOST` and `SCOPES` are this project's `SHOPIFY_APP_URL` and
+`SHOPIFY_SCOPES` under Shopify's names, mapped in
+`apps/admin-app/src/server/cli-env-aliases.ts`. So for this path **`.env` needs
+only `DATABASE_URL`** — and putting the scopes in `.env` as well is actively
+worse, because `[access_scopes]` in `shopify.app.toml` is what the merchant
+granted and a disagreement puts the app in a scope-update loop.
+
+#### Running the server without the CLI
+
+`pnpm --filter admin-app dev` starts the same server, and then every variable in
+`.env.example` is yours to set, including a tunnel URL you provide and keep in
+step with the dashboard by hand. Useful for reading logs against a tunnel you
+control; the CLI path is shorter for everything else.
+
+#### What should happen on a successful install
+
+Store preparation runs by itself after OAuth, against the shop's **offline**
+token, and is idempotent — Shopify's `TAKEN` user error is treated as "already
+there". Look for this in the server output:
+
+```
+INFO  Store prepared for <shop>.myshopify.com
+```
+
+If it is absent, the definitions were not created; the **Prepare store** button
+on the bundle screen runs the same code on demand and shows what Shopify
+refused. On `ecorn-oj1cb5ll` everything already exists, so every line of the
+report should read `already_present` — a store where it reads `created` is a
+store that was genuinely missing them.
 
 ## Useful commands
 
