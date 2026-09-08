@@ -146,7 +146,14 @@ locally.
       budgets (non-blocking, report as an artifact). The app job now runs a
       `postgres:16-alpine` service, so the idempotency and `SKIP LOCKED` suites
       run on every pull request instead of only where Docker happens to be up
-- [ ] `docker-compose.yml` — the project starts for anyone who clones the repository
+- [x] `docker-compose.yml` — the project starts for anyone who clones the
+      repository. Verified by doing it rather than by reading the file: a fresh
+      `git clone`, `pnpm install`, its own Compose database on another port,
+      migrations, and the whole suite — 262 tests, integration ones included.
+      The rehearsal is what removed the fixed `container_name` and the fixed
+      host port: this base is cloned once per client project, and those two
+      lines made a second clone refuse to start. The expected output of each
+      step is now a table in [`development.md`](development.md)
 - [ ] Theme published as a preview on Shopify's CDN
 
 ---
