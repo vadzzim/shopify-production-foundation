@@ -7,6 +7,7 @@ import {
   BundleValidationError,
   createStarterBundle,
   deleteBundle,
+  listBundles,
   listCandidateProducts,
   updateBundle,
 } from './bundles';
@@ -337,6 +338,117 @@ describe('createStarterBundle', () => {
     expect(
       bundle.items.find((item) => item.routineStep === 'cleanse')?.title,
     ).toBe('Product 3');
+  });
+});
+
+describe('listBundles', () => {
+  /**
+   * A shop with `count` routine sets, each on three products of its own.
+   *
+   * Distinct products per set is what matters: the lookup is by unique product
+   * gid, so a shop that reuses the same cleanser everywhere never approaches the
+   * limit however many sets it has.
+   */
+  function shopWith(count: number): {
+    prisma: PrismaClient;
+    batches: number[];
+  } {
+    const rows = Array.from({ length: count }, (_, index) => ({
+      id: `bundle_${String(index)}`,
+      title: `Routine set ${String(index + 1)}`,
+      handle: `routine-set-${String(index + 1)}`,
+      status: 'DRAFT' as const,
+      updatedAt: new Date('2026-09-08T00:00:00.000Z'),
+      items: (['CLEANSE', 'TREAT', 'MOISTURIZE'] as const).map(
+        (routineStep, position) => ({
+          productGid: `gid://shopify/Product/${String(index * 3 + position)}`,
+          routineStep,
+          position,
+        }),
+      ),
+    }));
+
+    const batches: number[] = [];
+
+    const graphql: AdminGraphql = async (document, variables) => {
+      if (!document.includes('BundleProducts')) {
+        throw new Error(`Unexpected document: ${document.slice(0, 40)}`);
+      }
+
+      const ids = variables?.ids as string[];
+      batches.push(ids.length);
+
+      return {
+        data: {
+          nodes: ids.map((id) => ({
+            id,
+            title: `Product ${id}`,
+            status: 'ACTIVE',
+            routineStep: { value: 'cleanse' },
+          })),
+        } as never,
+        extensions: {
+          cost: {
+            requestedQueryCost: 500,
+            actualQueryCost: 500,
+            throttleStatus: {
+              maximumAvailable: 2000,
+              currentlyAvailable: 1500,
+              restoreRate: 100,
+            },
+          },
+        },
+      };
+    };
+
+    return {
+      prisma: {
+        bundle: { findMany: async () => rows },
+        // Threaded through so the test can name the graphql it built.
+        graphql,
+      } as unknown as PrismaClient & { graphql: AdminGraphql },
+      batches,
+    };
+  }
+
+  function graphqlOf(prisma: PrismaClient): AdminGraphql {
+    return (prisma as unknown as { graphql: AdminGraphql }).graphql;
+  }
+
+  it('splits the product lookup into batches of 250', async () => {
+    // The bug this pins: every distinct product across every routine set went
+    // into one `nodes(ids:)` call. Shopify caps an input array at 250 and
+    // rejects the query past it, so the whole list — and the editor, which
+    // loads through the same path — became unavailable to a shop with more
+    // products in its sets than that.
+    const { prisma, batches } = shopWith(100);
+
+    const bundles = await listBundles(prisma, graphqlOf(prisma), SHOP, noWait);
+
+    expect(batches).toEqual([250, 50]);
+    expect(bundles).toHaveLength(100);
+    // Every set still gets its titles: the batches are joined, not the last one
+    // kept.
+    expect(bundles.every((bundle) =>
+      bundle.items.every((item) => item.title !== null),
+    )).toBe(true);
+  });
+
+  it('makes one call when the products fit in a single batch', async () => {
+    const { prisma, batches } = shopWith(10);
+
+    await listBundles(prisma, graphqlOf(prisma), SHOP, noWait);
+
+    expect(batches).toEqual([30]);
+  });
+
+  it('makes no call at all for a shop with no bundles', async () => {
+    const { prisma, batches } = shopWith(0);
+
+    expect(await listBundles(prisma, graphqlOf(prisma), SHOP, noWait)).toEqual(
+      [],
+    );
+    expect(batches).toEqual([]);
   });
 });
 
