@@ -113,3 +113,72 @@ export const BUNDLE_PRODUCTS = /* GraphQL */ `
     }
   }
 `;
+
+/**
+ * One product's routine step, for the `products/update` reconciliation.
+ *
+ * A single product by id rather than a page of them: the webhook already says
+ * which product changed, so paginating the catalog to find it would be one call
+ * per page to answer a question the payload asked about one row. `product`
+ * returns null for a product the token can no longer see, which is the deleted
+ * case and is handled rather than treated as an error.
+ */
+export const PRODUCT_ROUTINE_STEP = /* GraphQL */ `
+  query ProductRoutineStep($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      status
+      routineStep: metafield(namespace: "custom", key: "routine_step") {
+        value
+      }
+    }
+  }
+`;
+
+/**
+ * Set on-hand stock for one or more InventoryItem × Location pairs.
+ *
+ * Three things about this document are not obvious and were confirmed against
+ * the 2026-07 schema through the Shopify Dev MCP rather than written from
+ * memory (ADR-0017 records the choice):
+ *
+ * **It is not `inventorySetOnHandQuantities`.** That mutation still exists in
+ * 2026-07 and is marked deprecated in it, in favour of this one. Writing new
+ * code against a mutation Shopify has already deprecated buys a rewrite at the
+ * next upgrade for nothing.
+ *
+ * **`name` selects which quantity is being written.** `"on_hand"` is physical
+ * stock; `"available"` is what a storefront may sell, which Shopify derives
+ * from on-hand minus commitments. An integration that sets `available`
+ * overwrites Shopify's own arithmetic about reserved units.
+ *
+ * **`@idempotent` is required.** Since 2026-04 this mutation refuses a request
+ * without an idempotency key. That is not a burden here but the point: the key
+ * is the job id, so a queue retry after an ambiguous failure re-sends the same
+ * write and Shopify applies it once.
+ */
+export const SET_INVENTORY_ON_HAND = /* GraphQL */ `
+  mutation SetInventoryOnHand(
+    $input: InventorySetQuantitiesInput!
+    $idempotencyKey: String!
+  ) {
+    inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
+      inventoryAdjustmentGroup {
+        createdAt
+        reason
+        referenceDocumentUri
+        changes {
+          name
+          delta
+          quantityAfterChange
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
