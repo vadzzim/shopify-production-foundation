@@ -213,6 +213,77 @@ refused. On `ecorn-oj1cb5ll` everything already exists, so every line of the
 report should read `already_present` — a store where it reads `created` is a
 store that was genuinely missing them.
 
+## Webhooks and the queue
+
+The app receives webhooks at `POST /api/webhooks`, verifies the signature
+itself, records the delivery, queues the work, and answers 200 before any of
+that work runs. Why it verifies the signature itself rather than using
+`shopify.processWebhooks()` is [ADR-0016](adr/0016-webhook-ingestion.md).
+
+### Subscriptions live in `shopify.app.toml`
+
+They are app-specific: declared once in the config file and applied by Shopify
+to every store that installs the app. Nothing subscribes through the Admin API,
+deliberately — see the ADR.
+
+Consequence worth remembering: **a change to `[[webhooks.subscriptions]]` reaches
+a store on `shopify app deploy`, not on a code deploy.** `shopify app dev`
+applies it to the linked development store while it runs.
+
+Adding a topic is three edits, and the tests fail until all three agree:
+
+1. `WEBHOOK_TOPICS` in `packages/shared/src/jobs.ts`
+2. `JOB_KIND_BY_TOPIC` in `apps/admin-app/src/server/webhook-router.ts`
+3. `[[webhooks.subscriptions]]` in `shopify.app.toml`
+
+### Trying it without Shopify
+
+A delivery is a signed POST, so `curl` can produce one. The signature is a
+base64 HMAC-SHA256 of the **exact bytes** of the body, keyed with
+`SHOPIFY_API_SECRET`:
+
+```bash
+BODY='{"id":1,"name":"#1001"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SHOPIFY_API_SECRET" -binary | base64)
+curl -i -X POST http://127.0.0.1:3000/api/webhooks   -H 'Content-Type: application/json'   -H "X-Shopify-Hmac-SHA256: $SIG"   -H 'X-Shopify-Topic: orders/create'   -H 'X-Shopify-Shop-Domain: ecorn-oj1cb5ll.myshopify.com'   -H 'X-Shopify-API-Version: 2026-07'   -H 'X-Shopify-Webhook-Id: local-test-1'   --data-raw "$BODY"
+```
+
+Send it twice with the same `X-Shopify-Webhook-Id`: the second answers
+`{"status":"duplicate"}` and queues nothing. Change one character of the body
+without re-signing and it answers 401.
+
+`printf`, not `echo` — `echo` appends a newline, which changes the bytes and
+therefore the signature. That is the same class of mistake the receiver's tests
+hit when they first sent bodies through superagent.
+
+### Watching the queue
+
+The worker runs inside the app process (ADR-0008) and polls every two seconds.
+Jobs are rows in `Job`:
+
+```bash
+pnpm prisma studio                  # look at Job and WebhookDelivery
+```
+
+A failed job is also visible in the app itself, in the sync log below the
+routine sets, with the reason and a Retry button.
+
+### Reading the logs
+
+Logging is pino, so the output is JSON, and every line a delivery causes carries
+the same `correlationId` — Shopify's own `X-Shopify-Webhook-Id`. That is what
+ties an HTTP request to work the worker does minutes later, possibly after a
+restart:
+
+```bash
+pnpm dev | npx pino-pretty                       # readable output
+pnpm dev | grep '"correlationId":"local-test-1"' # one delivery, end to end
+```
+
+`pino-pretty` is deliberately not a dependency: as a transport it runs a worker
+thread and can lose lines on exit, and piping gets the same result outside the
+process.
+
 ## Useful commands
 
 ```bash
@@ -222,10 +293,36 @@ pnpm test
 pnpm test:coverage
 pnpm prisma studio                  # database GUI
 pnpm prisma migrate dev --name <what_changed>    # never `db push` (rule 11)
+pnpm prisma migrate deploy          # apply existing migrations, what CI runs
 pnpm --filter admin-app build       # production browser bundle
 shopify theme check --path theme
 shopify theme push --path theme --unpublished    # stable preview URL
 ```
+
+### Tests that need a database
+
+Most of the suite runs against fakes. Three files do not, and cannot: the
+guarantees they check — `ON CONFLICT DO NOTHING` making a duplicate webhook a
+no-op, and `FOR UPDATE SKIP LOCKED` handing one job to exactly one of two
+workers — are properties of PostgreSQL, and a mocked Prisma would only confirm
+that the method we meant to call was called.
+
+Those files (`*.integration.test.ts`) **skip themselves when `DATABASE_URL` is
+unset**, so `pnpm test` is green on a fresh clone with nothing running. To
+actually run them:
+
+```bash
+docker compose up -d
+pnpm prisma migrate deploy
+pnpm test
+```
+
+CI sets `DATABASE_URL` and runs a `postgres:16-alpine` service, so they do run on
+every pull request. If a change to the queue passes locally and fails in CI,
+this is why: locally they were skipped.
+
+They write only to shops prefixed `itest-` and clean up after themselves, so they
+will not disturb data for the real development store in the same database.
 
 ## Development store constraints
 
