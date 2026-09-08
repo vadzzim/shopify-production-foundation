@@ -148,7 +148,9 @@ Weak: "implement inventory sync."
 Strong: "In `apps/sync-worker/src/handlers/inventory.ts`, add a handler for the
 `stock.changed` event from the mock ERP. The input schema is in
 `packages/shared/src/erp.ts`. Push the update to Shopify via
-`inventorySetOnHandQuantities`. Note that inventory lives on the
+`inventorySetQuantities` with `name: "on_hand"` — not
+`inventorySetOnHandQuantities`, which still exists in the pinned version and is
+deprecated in it (ADR-0017). Note that inventory lives on the
 InventoryItem × Location pair, not on the variant. Events originating from our
 own sync (`syncOrigin === 'nordlys'`) must be skipped — that is an echo, and a
 test for it is required. Do not change the public interface of the queue."
