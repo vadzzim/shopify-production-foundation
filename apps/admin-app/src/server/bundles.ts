@@ -7,8 +7,13 @@ import {
   type RoutineStep,
 } from '@nordlys/shared';
 
-import { unwrap, type AdminGraphql } from './admin-graphql';
+import {
+  unwrap,
+  type AdminGraphql,
+  type AdminGraphqlResponse,
+} from './admin-graphql';
 import { BUNDLE_PRODUCTS, ROUTINE_STEP_PRODUCTS } from './graphql-documents';
+import { createThrottleGate, type ThrottleGateOptions } from './throttle';
 
 /**
  * Bundles: the one domain object this app owns.
@@ -62,11 +67,26 @@ interface BundleProductsData {
 }
 
 interface RoutineStepProductsData {
-  products: { nodes: ProductNode[] };
+  products: {
+    nodes: ProductNode[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
 }
 
-/** How many products to inspect when assembling a starter bundle. */
-const CATALOG_PAGE_SIZE = 100;
+/** Products per page when searching the catalog. 250 is the Admin API maximum. */
+const CATALOG_PAGE_SIZE = 250;
+
+/**
+ * How many pages the starter-bundle search will read before giving up.
+ *
+ * There is a bound rather than "until `hasNextPage` is false" because this runs
+ * inside a button press. 2,500 products is far more than the search needs — it
+ * stops as soon as all three steps are filled, which on a normal catalog is the
+ * first page — and a store larger than that has a different problem: a full
+ * catalog scan there belongs in a bulk operation (rule 4, ADR-0004), not in a
+ * synchronous request.
+ */
+const MAX_CATALOG_PAGES = 10;
 
 /**
  * Look up the products a set of bundles refers to, in one request.
@@ -143,44 +163,39 @@ export async function createStarterBundle(
   prisma: PrismaClient,
   graphql: AdminGraphql,
   shop: string,
+  throttleOptions: ThrottleGateOptions = {},
 ): Promise<Bundle> {
-  const data = unwrap(
-    'RoutineStepProducts',
-    await graphql<RoutineStepProductsData>(ROUTINE_STEP_PRODUCTS, {
-      first: CATALOG_PAGE_SIZE,
-      query: 'status:active',
-    }),
+  const { chosen, scanned, exhausted } = await findFirstProductPerStep(
+    graphql,
+    throttleOptions,
   );
 
-  const firstPerStep = new Map<RoutineStep, ProductNode>();
-  for (const product of data.products.nodes) {
-    const value = product.routineStep?.value;
-    if (!value) continue;
-
-    const step = ROUTINE_STEPS.find((candidate) => candidate === value);
-    if (step && !firstPerStep.has(step)) {
-      firstPerStep.set(step, product);
-    }
-  }
-
-  const missing = ROUTINE_STEPS.filter((step) => !firstPerStep.has(step));
+  const missing = ROUTINE_STEPS.filter((step) => !chosen.has(step));
   if (missing.length > 0) {
+    // The scope of the claim matters. Saying "the catalog has none" after
+    // looking at one page is a lie the merchant cannot check, and it sends them
+    // looking for a metafield problem that may not exist.
+    const scope = exhausted
+      ? `none of the ${scanned} active products in the catalog`
+      : `none of the first ${scanned} active products (the search stopped ` +
+        `there; the catalog has more)`;
+
     throw new BundleValidationError(
-      'The catalog has no active product for every routine step, so a bundle ' +
-        'cannot be assembled yet.',
+      `A routine set needs one product per step, and ${scope} covers every ` +
+        `step yet.`,
       missing.map(
         (step) =>
-          `No active product has custom.routine_step = "${step}". Set the ` +
-          `metafield on a product, or run Prepare store if the definition is ` +
-          `missing.`,
+          `No active product found with custom.routine_step = "${step}". Set ` +
+          `the metafield on a product, or run Prepare store if the definition ` +
+          `is missing.`,
       ),
     );
   }
 
   const items = ROUTINE_STEPS.map((step, position) => {
-    // Checked by the `missing` guard above; the non-null assertion is the price
-    // of Map#get's signature, not an assumption about the data.
-    const product = firstPerStep.get(step)!;
+    // Guaranteed by the `missing` check above; the assertion is the price of
+    // Map#get's signature, not an assumption about the data.
+    const product = chosen.get(step)!;
     return {
       productGid: product.id,
       routineStep: toPrismaRoutineStep(step),
@@ -190,9 +205,14 @@ export async function createStarterBundle(
 
   const row = await insertBundleWithUniqueHandle(prisma, shop, items);
 
-  const products = await fetchProducts(
-    graphql,
-    row.items.map((item) => item.productGid),
+  // Built from the products the search already returned, with no second Admin
+  // API call. An earlier version re-fetched them here, after the insert had
+  // committed: a Shopify hiccup in that window answered the merchant with an
+  // error for a bundle that had in fact been created, and pressing the button
+  // again made a second one. There is no request left between the write and the
+  // response to fail.
+  const byGid = new Map(
+    [...chosen.values()].map((product) => [product.id, product]),
   );
 
   return {
@@ -202,7 +222,7 @@ export async function createStarterBundle(
     status: fromPrismaBundleStatus(row.status),
     updatedAt: row.updatedAt.toISOString(),
     items: row.items.map((item): BundleItem => {
-      const product = products.get(item.productGid);
+      const product = byGid.get(item.productGid);
       return {
         productGid: item.productGid,
         routineStep: fromPrismaRoutineStep(item.routineStep),
@@ -212,6 +232,90 @@ export async function createStarterBundle(
       };
     }),
   };
+}
+
+interface CatalogSearchResult {
+  /** The first active product found for each step. */
+  chosen: Map<RoutineStep, ProductNode>;
+  /** How many active products were actually looked at. */
+  scanned: number;
+  /** Whether the search reached the end of the catalog rather than its page cap. */
+  exhausted: boolean;
+}
+
+/**
+ * Walk the active catalog until every routine step has a product, or the pages
+ * run out.
+ *
+ * The step is read as a field rather than used as a `query:` filter because
+ * filtering products by a metafield needs the definition to be
+ * admin-filterable, which this store's is not — and asking for a filter the
+ * definition cannot serve returns everything, silently. So the grouping happens
+ * here.
+ *
+ * Rule 4: this is a loop of Admin API calls, so each response feeds the
+ * throttle gate and the next page waits when the bucket cannot afford it.
+ */
+async function findFirstProductPerStep(
+  graphql: AdminGraphql,
+  throttleOptions: ThrottleGateOptions,
+): Promise<CatalogSearchResult> {
+  const gate = createThrottleGate(throttleOptions);
+  const chosen = new Map<RoutineStep, ProductNode>();
+
+  let after: string | null = null;
+  let scanned = 0;
+  let exhausted = false;
+
+  for (let page = 0; page < MAX_CATALOG_PAGES; page += 1) {
+    await gate.beforeCall();
+
+    // Annotated rather than inferred: `after` is assigned from this response's
+    // own `pageInfo`, and without the annotation that is a circular inference
+    // TypeScript resolves to `any`.
+    const response: AdminGraphqlResponse<RoutineStepProductsData> =
+      await graphql<RoutineStepProductsData>(ROUTINE_STEP_PRODUCTS, {
+        first: CATALOG_PAGE_SIZE,
+        query: 'status:active',
+        ...(after === null ? {} : { after }),
+      });
+    gate.record(response.extensions?.cost);
+
+    const { products } = unwrap('RoutineStepProducts', response);
+
+    for (const product of products.nodes) {
+      scanned += 1;
+
+      const value = product.routineStep?.value;
+      if (!value) continue;
+
+      const step = ROUTINE_STEPS.find((candidate) => candidate === value);
+      if (step && !chosen.has(step)) {
+        chosen.set(step, product);
+      }
+    }
+
+    // Every step filled: nothing later in the catalog can change the answer,
+    // and `exhausted` only shapes the "not found" message, which is not needed.
+    if (chosen.size === ROUTINE_STEPS.length) {
+      return { chosen, scanned, exhausted: !products.pageInfo.hasNextPage };
+    }
+
+    if (!products.pageInfo.hasNextPage) {
+      exhausted = true;
+      break;
+    }
+
+    after = products.pageInfo.endCursor;
+    if (after === null) {
+      // hasNextPage with no cursor should not happen; treating it as the end is
+      // better than looping on the same page.
+      exhausted = true;
+      break;
+    }
+  }
+
+  return { chosen, scanned, exhausted };
 }
 
 interface NewBundleItem {
