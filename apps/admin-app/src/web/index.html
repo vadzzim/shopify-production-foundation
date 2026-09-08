@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!--
+      The API key identifies the app to App Bridge. It is public — the secret
+      never leaves the server. The placeholder is substituted by the Express
+      server when it hands out this document, so the same built file works
+      against any app credentials without a rebuild.
+    -->
+    <meta name="shopify-api-key" content="%SHOPIFY_API_KEY%" />
+
+    <!--
+      Two scripts, loaded from Shopify's CDN rather than bundled.
+
+      app-bridge.js is deliberately unversioned: Shopify ships one current
+      version and this URL always serves it. Besides the admin APIs, it is what
+      patches `fetch` so that same-origin requests from this page carry a signed
+      session token — which is why api.ts calls plain `fetch`.
+
+      polaris-1.js registers the Polaris web components (`s-page`, `s-table`, …)
+      as custom elements. It is a channel that tracks the newest stable Polaris
+      1 release, which is what Shopify recommends for production; polaris-1.1-rc
+      exists and has components this one does not (`s-empty-state`), but it is a
+      release candidate and this repository does not ship against those.
+
+      Both are outside the bundle on purpose: they are the admin's own UI layer,
+      and pinning copies of them in our build would drift from the admin around
+      the iframe.
+    -->
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+    <script src="https://cdn.shopify.com/shopifycloud/polaris-1.js"></script>
+
+    <title>NORDLYS routine sets</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>
