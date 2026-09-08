@@ -1,0 +1,70 @@
+# App configuration for Shopify CLI.
+#
+# This app was not scaffolded with `shopify app init` — it is hand-built on
+# Express (ADR-0002) — so this file is written rather than generated. That is
+# supported: `shopify app config link` links an existing project to an app in
+# the dashboard and fills in the three values below that identify it.
+#
+#   shopify app config link      # writes client_id, application_url, redirect_urls
+#   shopify app dev              # tunnel + install on the development store
+#
+# `client_id` is intentionally empty here. It is not a secret — it is the same
+# public value the browser receives as SHOPIFY_API_KEY — but it identifies one
+# specific app in one specific organisation, so committing it would tie this
+# reusable base to a single dashboard entry. `config link` fills it in locally.
+client_id = ""
+
+name = "NORDLYS"
+handle = "nordlys"
+
+# Overwritten by `shopify app dev` on every run, because the tunnel URL is
+# ephemeral (ADR-0008). The value here only matters as a placeholder.
+application_url = "https://example.com"
+
+# The app renders inside the Shopify admin in an iframe. This is what makes App
+# Bridge and the Polaris web components available, and it is why the app URL has
+# to be HTTPS: an http iframe inside the https admin is blocked as mixed
+# content, not by us but by the browser.
+embedded = true
+
+[build]
+# With an ephemeral tunnel this has to be true, or every `shopify app dev` run
+# would need the URL pasted into the dashboard by hand.
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+# Where the CLI looks for shopify.web.toml. Stated explicitly because this is a
+# monorepo: without it the CLI scans the tree, and `theme/` is not a web process.
+web_directories = ["apps/admin-app"]
+
+[access_scopes]
+# Must stay identical to SHOPIFY_SCOPES in .env — a mismatch puts the app in a
+# scope-update loop on every load. They cannot drift in practice, because
+# `shopify app dev` injects this list as SCOPES and the app reads that in
+# preference to the file (see apps/admin-app/src/server/env.ts).
+#
+# read/write_metaobject_definitions are here for the install step: the app
+# creates the `ingredient` metaobject definition and the custom.* metafield
+# definitions itself (ADR-0003), and write_products does not cover those.
+scopes = "read_products,write_products,read_inventory,write_inventory,read_orders,read_metaobject_definitions,write_metaobject_definitions"
+
+[auth]
+# Kept in step with `shopify.config.auth.callbackPath` in
+# apps/admin-app/src/server/shopify.ts. `shopify app dev` rewrites the host part
+# of these on every run; the path is ours.
+redirect_urls = ["https://example.com/api/auth/callback"]
+
+[webhooks]
+# The one place in the repository where the Admin API version is duplicated:
+# TOML cannot import a TypeScript constant. `packages/shared/src/api-version.ts`
+# remains the single source of truth (rule 1, ADR-0009), and a test in
+# packages/shared/src/api-version.test.ts fails if this line drifts from it.
+#
+# A webhook registered at a different version than the code that parses its
+# payload is the same class of bug as a mismatched query, arriving through a
+# different door.
+api_version = "2026-07"
+
+# No subscriptions yet. HMAC verification, idempotency and the queue are phase 3
+# (see docs/roadmap.md), and an endpoint that accepts webhooks before it can
+# process them idempotently drops deliveries silently.

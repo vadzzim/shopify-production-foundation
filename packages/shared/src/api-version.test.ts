@@ -25,6 +25,23 @@ describe('ADMIN_API_VERSION', () => {
     expect(ADMIN_API_VERSION).toMatch(/^\d{4}-(01|04|07|10)$/);
   });
 
+  it('matches the webhook API version in shopify.app.toml', () => {
+    // The one place the version is necessarily duplicated: TOML cannot import a
+    // TypeScript constant, and Shopify CLI needs `[webhooks] api_version` in
+    // the app config. A webhook registered at a different version than the code
+    // parsing its payload is the same bug as a mismatched query, arriving
+    // through a different door — so the duplication is guarded rather than
+    // trusted.
+    const toml = readFileSync(
+      fileURLToPath(new URL('shopify.app.toml', repositoryRoot)),
+      'utf8',
+    );
+
+    const match = /^\s*api_version\s*=\s*"([^"]+)"/m.exec(toml);
+
+    expect(match?.[1]).toBe(ADMIN_API_VERSION);
+  });
+
   it('does not appear as an environment variable in .env.example', () => {
     // ADR-0009, decision 2: making the version deployment configuration creates
     // a combination — old GraphQL documents, new version — that nothing

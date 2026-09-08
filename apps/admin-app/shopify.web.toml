@@ -1,0 +1,24 @@
+# How Shopify CLI runs this app during `shopify app dev`.
+#
+# Both roles on one process, because that is what an embedded app needs: the
+# admin frames it at a single URL, so the JSON API and the React screen have to
+# share an origin. Vite runs as Express middleware rather than on a second port
+# (see src/server/app.ts).
+roles = ["frontend", "backend"]
+
+# Must match `shopify.config.auth.callbackPath` in src/server/shopify.ts. This
+# overrides the redirect URLs in shopify.app.toml, so the two cannot disagree.
+auth_callback_path = "/api/auth/callback"
+
+# Where webhook deliveries will arrive from phase 3 onwards. Declared now
+# because `shopify app dev --reset` posts an app/uninstalled to this path, and
+# the default it would otherwise assume is /api/webhooks anyway.
+webhooks_path = "/api/webhooks"
+
+[commands]
+# The CLI provides SHOPIFY_API_KEY, SHOPIFY_API_SECRET, HOST, SCOPES and PORT to
+# this process as environment variables, which is why none of them belong in
+# .env when running this way — src/server/env.ts reads the CLI's names as
+# aliases for its own. Only DATABASE_URL has to be set locally.
+dev = "pnpm dev"
+build = "pnpm build"
