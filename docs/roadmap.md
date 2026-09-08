@@ -64,8 +64,8 @@ Bundle management and sync observability.
 - [x] Metafield and metaobject definitions created on app install
       (`metafieldDefinitionCreate`) — the app prepares the store itself.
       Idempotent: `TAKEN` is a success, anything else is not
-- [~] Polaris UI: bundle list, empty state and explicit error messages are done;
-      editing and the sync log are not. The criterion said "skeletons": Polaris
+- [~] Polaris UI: bundle list, empty state, explicit error messages and the sync
+      log are done; editing is not. The criterion said "skeletons": Polaris
       1.0 ships no skeleton component, so the table's own `loading` state is
       what the screen uses — see
       [ADR-0015](adr/0015-polaris-web-components-over-polaris-react.md)
@@ -82,32 +82,61 @@ against `ecorn-oj1cb5ll`. Everything below the install is exercised by tests.
 
 ## Phase 3 — Webhooks and synchronisation
 
-- [ ] HMAC verification against the raw `Buffer` before JSON parsing, using
-      `crypto.timingSafeEqual`
-- [ ] Idempotency on `X-Shopify-Webhook-Id`: unique index plus
-      `ON CONFLICT DO NOTHING`
-- [ ] The endpoint responds 200 before any work begins; work goes to the queue
-- [ ] Queue on a PostgreSQL table, jobs claimed with `FOR UPDATE SKIP LOCKED`,
-      exponential backoff, attempt limit, DLQ status
-- [ ] Topics: `orders/create`, `products/update`, `app/uninstalled` with data cleanup
-- [ ] GDPR topics: `customers/data_request`, `customers/redact`, `shop/redact`
-- [ ] Structured logs (pino) with a correlation id carried from webhook receipt
-      through to the Admin API call
-- [ ] Inventory sync accounting for the fact that stock lives on the
-      InventoryItem × Location pair
+- [x] HMAC verification against the raw `Buffer` before JSON parsing, using
+      `crypto.timingSafeEqual`. Written rather than delegated to
+      `shopify.processWebhooks()`, which verifies against a decoded string with
+      a hand-written comparison and answers only after its handlers finish — see
+      [ADR-0016](adr/0016-webhook-ingestion.md)
+- [x] Idempotency on `X-Shopify-Webhook-Id`: primary key plus
+      `ON CONFLICT DO NOTHING`, in the same transaction as the enqueue.
+      Exercised against PostgreSQL, including three concurrent deliveries of one
+      event
+- [x] The endpoint responds 200 before any work begins; work goes to the queue.
+      Asserted: after the response the job is `PENDING` with zero attempts
+- [x] Queue on a PostgreSQL table, jobs claimed with `FOR UPDATE SKIP LOCKED`,
+      exponential backoff with jitter, attempt limit, `DEAD` as the dead-letter
+      state, and a reaper for jobs whose worker disappeared
+- [x] Topics: `orders/create`, `products/update`, `app/uninstalled`.
+      Uninstall clears sessions and deliberately keeps bundles — deletion is
+      `shop/redact`'s job, 48 hours later (ADR-0016)
+- [x] Compliance topics: `customers/data_request`, `customers/redact`,
+      `shop/redact`. The first two are no-ops **by design** — this database holds
+      no customer personal data — and a test asserts that premise rather than
+      trusting it
+- [x] Structured logs (pino) with a correlation id carried from webhook receipt
+      through the queue to the Admin API call. The id is Shopify's own delivery
+      id, so a log line matches a row in the platform's delivery log
+- [~] Inventory sync on the InventoryItem × Location pair, with
+      `inventorySetQuantities` — not the `inventorySetOnHandQuantities` the plan
+      named, which is deprecated in 2026-07 (see
+      [ADR-0017](adr/0017-inventory-writes.md)). The handler, the absolute-value
+      semantics and the job-id idempotency key are written and tested; **what
+      produces these jobs is not**. That is the mock ERP, which is roadmap v2, so
+      today they are enqueued by hand
 
 **Completion criterion:** redelivery of the same webhook creates no duplicate;
 an external system failure is visible in the UI and can be retried manually.
+**Met**, and by tests rather than by observation: the duplicate case is asserted
+against a real PostgreSQL over real HTTP, and the sync log renders a failed job
+with its reason and a Retry button that puts it back on the queue.
+
+Not verified against a live store. The app has still never been opened in the
+admin — the IPv6 loopback problem in `docs/development.md` blocks the tunnel, and
+webhooks need one. What that would add is confirmation that Shopify's headers and
+payloads are what the tests assume; the logic itself is exercised end to end
+locally.
 
 ---
 
 ## Phase 4 — Quality and reproducibility
 
-- [ ] Tests: HMAC (valid, invalid and missing signature, tampered body),
-      idempotency, backoff on an exhausted bucket, `userErrors` handling,
-      variant-to-external-SKU mapping
-- [ ] CI: typecheck, lint, tests, `shopify theme check`, secret scan, Lighthouse
-      budgets (non-blocking, report as an artifact)
+- [~] Tests: HMAC (valid, invalid and missing signature, tampered body),
+      idempotency, backoff on an exhausted bucket and `userErrors` handling are
+      done. Variant-to-external-SKU mapping is not — it needs the mock ERP
+- [x] CI: typecheck, lint, tests, `shopify theme check`, secret scan, Lighthouse
+      budgets (non-blocking, report as an artifact). The app job now runs a
+      `postgres:16-alpine` service, so the idempotency and `SKIP LOCKED` suites
+      run on every pull request instead of only where Docker happens to be up
 - [ ] `docker-compose.yml` — the project starts for anyone who clones the repository
 - [ ] Theme published as a preview on Shopify's CDN
 
