@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { AdminGraphql } from './admin-graphql';
+import { JOB_HANDLERS, RetryLaterError } from './job-handlers';
 import type { Logger } from './logger';
 import { enqueue } from './queue';
 import {
@@ -77,6 +78,40 @@ describe.skipIf(!hasDatabase)('the worker', () => {
     const row = await prisma.job.findFirstOrThrow({ where: { id } });
     expect(row.status).toBe('SUCCEEDED');
     expect(row.finishedAt).not.toBeNull();
+    expect(row.lockedBy).toBeNull();
+  });
+
+  it('reschedules a waiting job without spending an attempt', async () => {
+    // A job that is waiting on something outside this process — the catalog
+    // export polling a bulk operation Shopify has not finished — is not
+    // failing. Two things have to be true of the row afterwards: it is PENDING
+    // with a future runAt, and the attempt the claim spent has been given back.
+    // Otherwise a slow export exhausts a budget that exists to bound failures,
+    // and the sync log shows a red row for work that is going fine.
+    const id = await enqueue(prisma, {
+      shop: SHOP,
+      kind: 'catalog.export',
+      payload: { bulkOperationId: 'gid://shopify/BulkOperation/1' },
+      correlationId: 'c1',
+    });
+
+    const runAt = new Date(Date.now() + 60_000);
+    const waiting = worker({
+      handlers: {
+        ...JOB_HANDLERS,
+        'catalog.export': () => {
+          throw new RetryLaterError('not finished yet', runAt);
+        },
+      },
+    });
+
+    expect(await waiting.tick()).toBe(1);
+
+    const row = await prisma.job.findFirstOrThrow({ where: { id } });
+    expect(row.status).toBe('PENDING');
+    expect(row.attempts).toBe(0);
+    expect(row.lastError).toBeNull();
+    expect(row.runAt.getTime()).toBe(runAt.getTime());
     expect(row.lockedBy).toBeNull();
   });
 

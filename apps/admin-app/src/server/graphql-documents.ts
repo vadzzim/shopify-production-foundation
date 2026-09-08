@@ -137,6 +137,89 @@ export const PRODUCT_ROUTINE_STEP = /* GraphQL */ `
 `;
 
 /**
+ * The catalog read a bulk operation runs, as a document Shopify keeps and
+ * executes on its own schedule.
+ *
+ * Three restrictions shape it, and all three are the bulk API's rather than
+ * ours: the query must contain a connection, it may not carry pagination
+ * arguments — the operation reads everything, which is the point — and the
+ * connection is written as `edges { node { … } }`.
+ *
+ * The metafield is selected without an alias, unlike every other document in
+ * this file. The result is not a GraphQL response but a JSONL file, one product
+ * per line, and giving the field its schema name keeps the parser matching what
+ * Shopify's own documentation shows rather than a name only this repository
+ * uses.
+ */
+export const CATALOG_EXPORT_QUERY = /* GraphQL */ `
+  {
+    products(query: "status:active") {
+      edges {
+        node {
+          id
+          title
+          status
+          metafield(namespace: "custom", key: "routine_step") {
+            value
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Start the catalog export.
+ *
+ * `bulkOperationRunQuery` returns as soon as Shopify has accepted the document;
+ * the work happens afterwards, and the id in the response is the only handle on
+ * it. Which is why the job records that id before doing anything else — see
+ * `catalog-export.ts`.
+ */
+export const START_CATALOG_EXPORT = /* GraphQL */ `
+  mutation StartCatalogExport($query: String!) {
+    bulkOperationRunQuery(query: $query) {
+      bulkOperation {
+        id
+        status
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+/**
+ * The state of one bulk operation.
+ *
+ * `bulkOperation(id:)`, not `currentBulkOperation`. The latter is the query
+ * every tutorial shows and it is deprecated as of 2026-01 in favour of this one
+ * — the same trap as `inventorySetOnHandQuantities` in ADR-0017, and invisible
+ * for the same reason: it still compiles, still validates and still works.
+ * Beyond the deprecation it is also the wrong question, because "the current
+ * operation" is not necessarily the one this job started: since 2026-01 an app
+ * may have five running at once on a shop.
+ *
+ * `partialDataUrl` is selected because a failed operation can still have
+ * produced data, and saying so in the error is more useful than "it failed".
+ */
+export const BULK_OPERATION_STATUS = /* GraphQL */ `
+  query BulkOperationStatus($id: ID!) {
+    bulkOperation(id: $id) {
+      id
+      status
+      errorCode
+      objectCount
+      url
+      partialDataUrl
+      completedAt
+    }
+  }
+`;
+
+/**
  * Set on-hand stock for one or more InventoryItem × Location pairs.
  *
  * Three things about this document are not obvious and were confirmed against

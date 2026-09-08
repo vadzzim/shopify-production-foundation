@@ -5,6 +5,8 @@ import type { AdminGraphql } from './admin-graphql';
 import {
   JOB_HANDLERS,
   PermanentJobError,
+  RetryLaterError,
+  createCatalogExportHandler,
   type HandlerContext,
 } from './job-handlers';
 import type { Logger, LogFields } from './logger';
@@ -478,6 +480,188 @@ describe('inventory.push', () => {
           {},
         ),
       ),
+    ).rejects.toBeInstanceOf(PermanentJobError);
+  });
+});
+
+describe('catalog.export', () => {
+  interface RecordedUpdate {
+    where: { id: string };
+    data: Record<string, unknown>;
+  }
+
+  function exportPrisma() {
+    const updates: RecordedUpdate[] = [];
+
+    const prisma = {
+      job: {
+        update: async (args: RecordedUpdate) => {
+          updates.push(args);
+          return { id: args.where.id };
+        },
+      },
+    } as unknown as PrismaClient;
+
+    return { prisma, updates };
+  }
+
+  /** A Shopify that starts an operation and then reports the given states. */
+  function fakeShopify(states: { status: string; url?: string | null }[]) {
+    const documents: string[] = [];
+    let index = 0;
+
+    const graphql: AdminGraphql = async (document) => {
+      documents.push(document);
+
+      if (document.includes('StartCatalogExport')) {
+        return {
+          data: {
+            bulkOperationRunQuery: {
+              bulkOperation: {
+                id: 'gid://shopify/BulkOperation/1',
+                status: 'CREATED',
+              },
+              userErrors: [],
+            },
+          } as never,
+        };
+      }
+
+      const state = states[Math.min(index, states.length - 1)];
+      index += 1;
+
+      return {
+        data: {
+          bulkOperation: {
+            id: 'gid://shopify/BulkOperation/1',
+            status: state?.status ?? 'RUNNING',
+            errorCode: null,
+            objectCount: '0',
+            url: state?.url ?? null,
+            partialDataUrl: null,
+            completedAt: '2026-09-08T12:00:00.000Z',
+          },
+        } as never,
+      };
+    };
+
+    return { graphql, documents };
+  }
+
+  /**
+   * The handler with its polling given a clock that does not tick.
+   *
+   * `pollBudgetMs: 0` makes the first status check the only one: the point of
+   * these tests is what the handler does with each answer, and the waiting
+   * itself is covered in catalog-export.test.ts.
+   */
+  const handler = createCatalogExportHandler({
+    sleep: async () => {},
+    pollIntervalMs: 0,
+    pollBudgetMs: 0,
+  });
+
+  const started = (documents: string[]) =>
+    documents.filter((document) => document.includes('StartCatalogExport'))
+      .length;
+
+  it('is registered for the kind the API enqueues', () => {
+    // The tests below drive an injected copy so they do not really wait thirty
+    // seconds; this is the line that says the registry has one at all.
+    expect(JOB_HANDLERS['catalog.export']).toBeTypeOf('function');
+  });
+
+  it('records the operation id before it starts polling', async () => {
+    // The whole reason this handler is safe to retry. Starting a bulk operation
+    // is not idempotent, so the id has to outlive the attempt that created it —
+    // and it is written before any polling, which is the window a crash would
+    // otherwise land in.
+    const job = jobFor('catalog.export', {});
+    const { prisma, updates } = exportPrisma();
+    const { graphql } = fakeShopify([{ status: 'RUNNING' }]);
+
+    await expect(
+      handler(contextFor(job, prisma, graphql)),
+    ).rejects.toBeInstanceOf(RetryLaterError);
+
+    expect(updates[0]?.data).toEqual({
+      payload: { bulkOperationId: 'gid://shopify/BulkOperation/1' },
+    });
+  });
+
+  it('resumes the operation a previous attempt started', async () => {
+    const job = jobFor('catalog.export', {
+      bulkOperationId: 'gid://shopify/BulkOperation/1',
+    });
+    const { prisma } = exportPrisma();
+    const { graphql, documents } = fakeShopify([{ status: 'RUNNING' }]);
+
+    await expect(
+      handler(contextFor(job, prisma, graphql)),
+    ).rejects.toBeInstanceOf(RetryLaterError);
+
+    // A retry that re-ran the mutation would leave two exports of the same
+    // catalog running against the same rate-limit bucket.
+    expect(started(documents)).toBe(0);
+  });
+
+  it('asks to be run again later rather than failing while it waits', async () => {
+    const job = jobFor('catalog.export', {
+      bulkOperationId: 'gid://shopify/BulkOperation/1',
+    });
+    const { prisma } = exportPrisma();
+    const { graphql } = fakeShopify([{ status: 'RUNNING' }]);
+
+    try {
+      await handler(contextFor(job, prisma, graphql));
+      expect.unreachable('the handler should have asked for a retry');
+    } catch (error) {
+      const later = error as RetryLaterError;
+      expect(later).toBeInstanceOf(RetryLaterError);
+      expect(later.runAt.getTime()).toBeGreaterThan(Date.now());
+    }
+  });
+
+  it('stores the report when the operation completes', async () => {
+    const job = jobFor('catalog.export', {
+      bulkOperationId: 'gid://shopify/BulkOperation/1',
+    });
+    const { prisma, updates } = exportPrisma();
+    const { graphql } = fakeShopify([
+      { status: 'COMPLETED', url: null },
+    ]);
+
+    await handler(contextFor(job, prisma, graphql));
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.data.result).toMatchObject({
+      bulkOperationId: 'gid://shopify/BulkOperation/1',
+      objectCount: 0,
+    });
+  });
+
+  it('forgets a failed operation so the retry starts a fresh one', async () => {
+    // Polling a FAILED operation again would answer the same thing forever.
+    const job = jobFor('catalog.export', {
+      bulkOperationId: 'gid://shopify/BulkOperation/1',
+    });
+    const { prisma, updates } = exportPrisma();
+    const { graphql } = fakeShopify([{ status: 'FAILED' }]);
+
+    await expect(
+      handler(contextFor(job, prisma, graphql)),
+    ).rejects.toThrow('ended as FAILED');
+
+    expect(updates[0]?.data).toEqual({ payload: {} });
+  });
+
+  it('refuses a payload that is not a catalog export', async () => {
+    const job = jobFor('catalog.export', { bulkOperationId: 42 });
+    const { prisma } = exportPrisma();
+    const { graphql } = fakeShopify([]);
+
+    await expect(
+      handler(contextFor(job, prisma, graphql)),
     ).rejects.toBeInstanceOf(PermanentJobError);
   });
 });

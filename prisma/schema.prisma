@@ -160,6 +160,15 @@ model Job {
   lockedAt      DateTime?
   lockedBy      String?
   lastError     String?
+  /// What the job produced, for the kinds that produce something a person reads
+  /// — today the catalog export's summary of the store. `jsonb`, and null for
+  /// every handler whose only output is a change somewhere else.
+  ///
+  /// Separate from `payload` on purpose: that column is the job's input, and a
+  /// retry re-reads it. Writing a result into it would mean a handler editing
+  /// its own instructions, and the two would be impossible to tell apart when
+  /// reading a row six months from now.
+  result        Json?
   /// Carried from the webhook request through every log line this job produces
   /// and into the Admin API calls it makes, so one delivery can be followed end
   /// to end in the logs.

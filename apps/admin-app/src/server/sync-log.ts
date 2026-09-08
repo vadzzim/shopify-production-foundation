@@ -1,7 +1,9 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import {
+  catalogExportReportSchema,
   jobKindSchema,
   webhookTopicSchema,
+  type CatalogExportStatus,
   type JobSummary,
 } from '@nordlys/shared';
 
@@ -26,6 +28,28 @@ import { toApiStatus } from './queue';
 
 /** Rows a shop's sync log shows at once. */
 const PAGE_SIZE = 50;
+
+/**
+ * The columns a {@link JobSummary} is built from.
+ *
+ * One constant rather than three copies of the same list: a column added to the
+ * summary and forgotten in one of the copies is a field that is `undefined` on
+ * exactly one screen, which is a bug nobody sees until they are looking at the
+ * wrong one.
+ */
+const SUMMARY_COLUMNS = {
+  id: true,
+  kind: true,
+  status: true,
+  attempts: true,
+  maxAttempts: true,
+  runAt: true,
+  createdAt: true,
+  finishedAt: true,
+  lastError: true,
+  correlationId: true,
+  payload: true,
+} as const;
 
 interface JobRow {
   id: string;
@@ -95,22 +119,49 @@ export async function listJobs(
     where: { shop },
     orderBy: { createdAt: 'desc' },
     take: PAGE_SIZE,
-    select: {
-      id: true,
-      kind: true,
-      status: true,
-      attempts: true,
-      maxAttempts: true,
-      runAt: true,
-      createdAt: true,
-      finishedAt: true,
-      lastError: true,
-      correlationId: true,
-      payload: true,
-    },
+    select: SUMMARY_COLUMNS,
   });
 
   return rows.map(toSummary);
+}
+
+/**
+ * The catalog export as the screen shows it: the newest run, and the newest
+ * report there is.
+ *
+ * Two queries rather than one, because they answer different questions. A
+ * merchant who has just started an export wants to see that it is running —
+ * that is the newest job — and while it runs they should still be able to read
+ * the numbers from the last time it finished. Returning only the newest job's
+ * own result would blank the report for as long as the new export takes.
+ */
+export async function latestCatalogExport(
+  prisma: PrismaClient,
+  shop: string,
+): Promise<CatalogExportStatus> {
+  const [job, reported] = await Promise.all([
+    prisma.job.findFirst({
+      where: { shop, kind: 'catalog.export' },
+      orderBy: { createdAt: 'desc' },
+      select: SUMMARY_COLUMNS,
+    }),
+    prisma.job.findFirst({
+      where: { shop, kind: 'catalog.export', result: { not: Prisma.DbNull } },
+      orderBy: { createdAt: 'desc' },
+      select: { result: true },
+    }),
+  ]);
+
+  // Parsed rather than cast. The column is `jsonb`: what is in it was written
+  // by some deploy of this app, not necessarily this one, and a report whose
+  // shape has since changed should read as "no report" rather than as an
+  // object with missing fields halfway down a screen.
+  const parsed = catalogExportReportSchema.safeParse(reported?.result);
+
+  return {
+    job: job ? toSummary(job) : null,
+    report: parsed.success ? parsed.data : null,
+  };
 }
 
 export class JobNotRetryableError extends Error {
@@ -173,19 +224,7 @@ export async function retryJob(
 
   const row = await prisma.job.findFirstOrThrow({
     where: { id: jobId, shop },
-    select: {
-      id: true,
-      kind: true,
-      status: true,
-      attempts: true,
-      maxAttempts: true,
-      runAt: true,
-      createdAt: true,
-      finishedAt: true,
-      lastError: true,
-      correlationId: true,
-      payload: true,
-    },
+    select: SUMMARY_COLUMNS,
   });
 
   log.info('Job requeued by hand', {

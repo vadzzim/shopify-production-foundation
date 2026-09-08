@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import {
+  catalogExportPayloadSchema,
   inventoryPushPayloadSchema,
   webhookJobPayloadSchema,
   type JobKind,
@@ -7,6 +8,12 @@ import {
 
 import type { AdminGraphql } from './admin-graphql';
 import { unwrap } from './admin-graphql';
+import {
+  CatalogExportFailedError,
+  runCatalogExport,
+  startCatalogExport,
+  type CatalogExportOptions,
+} from './catalog-export';
 import { PRODUCT_ROUTINE_STEP } from './graphql-documents';
 import { pushInventoryOnHand } from './inventory';
 import type { Logger } from './logger';
@@ -61,6 +68,25 @@ export class PermanentJobError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PermanentJobError';
+  }
+}
+
+/**
+ * Raised when a job has done everything it can for now and is waiting on
+ * something outside this process.
+ *
+ * The opposite of {@link PermanentJobError}, and equally not a failure: the
+ * worker puts the job back on the queue at `runAt` without counting an attempt
+ * or writing an error anyone has to read. Polling a bulk operation Shopify has
+ * not finished is the case it exists for.
+ */
+export class RetryLaterError extends Error {
+  readonly runAt: Date;
+
+  constructor(message: string, runAt: Date) {
+    super(message);
+    this.name = 'RetryLaterError';
+    this.runAt = runAt;
   }
 }
 
@@ -380,10 +406,104 @@ const handleInventoryPush: JobHandler = async ({ job, graphqlFor, log }) => {
   });
 };
 
+/** How long the export waits before its next status check. */
+const EXPORT_RECHECK_MS = 15_000;
+
+/**
+ * Export the catalog with a bulk operation, one poll at a time.
+ *
+ * The handler is split across attempts on purpose, and the split is what makes
+ * it safe under an at-least-once queue:
+ *
+ * **Attempt one starts the operation and immediately records its id on the job
+ * row.** Starting a bulk operation is not idempotent — a retry that re-ran the
+ * mutation would start a second export of the same catalog — so the id has to
+ * outlive the attempt that created it. It is written before any polling, which
+ * is the window a crash would otherwise land in.
+ *
+ * **Every later attempt resumes polling.** Within one attempt the polling has a
+ * budget of half a minute, because the worker runs jobs sequentially and an
+ * export that takes ten minutes must not hold the webhook jobs behind it for
+ * ten minutes. When the budget runs out the job is rescheduled rather than
+ * failed: it is waiting, not broken.
+ *
+ * A factory rather than a bare handler so the polling can be given a clock in
+ * tests. Every other handler is testable as written; this one waits, and a test
+ * that really waited thirty seconds would be a test nobody runs.
+ */
+export function createCatalogExportHandler(
+  options: CatalogExportOptions = {},
+): JobHandler {
+  return async ({ job, prisma, graphqlFor, log }) => {
+    const parsed = catalogExportPayloadSchema.safeParse(job.payload);
+
+    if (!parsed.success) {
+      throw new PermanentJobError(
+        `Job payload does not match the catalog export shape: ${parsed.error.message}`,
+      );
+    }
+
+    const graphql = await graphqlFor(job.shop);
+    let { bulkOperationId } = parsed.data;
+
+    if (!bulkOperationId) {
+      bulkOperationId = await startCatalogExport(graphql);
+
+      await prisma.job.update({
+        where: { id: job.id },
+        data: { payload: { bulkOperationId } },
+      });
+
+      log.info('Catalog export started', { bulkOperationId });
+    }
+
+    let outcome;
+
+    try {
+      outcome = await runCatalogExport(graphql, bulkOperationId, options);
+    } catch (error) {
+      if (error instanceof CatalogExportFailedError) {
+        // The operation is over and polling it again would answer the same thing
+        // forever. Clearing the id lets the retry start a fresh one, and the
+        // attempt budget is what stops that repeating indefinitely.
+        await prisma.job.update({
+          where: { id: job.id },
+          data: { payload: {} },
+        });
+      }
+      throw error;
+    }
+
+    if (outcome.status === 'running') {
+      log.info('Catalog export still running', {
+        bulkOperationId,
+        objectCount: outcome.objectCount,
+      });
+
+      throw new RetryLaterError(
+        'The bulk operation has not finished yet.',
+        new Date(Date.now() + EXPORT_RECHECK_MS),
+      );
+    }
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: { result: outcome.report },
+    });
+
+    log.info('Catalog export finished', {
+      bulkOperationId,
+      objectCount: outcome.report.objectCount,
+      withoutStep: outcome.report.withoutStep,
+    });
+  };
+}
+
 export const JOB_HANDLERS: Record<JobKind, JobHandler> = {
   'order.received': handleOrderReceived,
   'product.reconcile': handleProductReconcile,
   'shop.cleanup': handleShopCleanup,
   'compliance.request': handleComplianceRequest,
   'inventory.push': handleInventoryPush,
+  'catalog.export': createCatalogExportHandler(),
 };

@@ -16,9 +16,15 @@ import {
   listCandidateProducts,
   updateBundle,
 } from './bundles';
+import { requestCatalogExport } from './catalog-export';
 import { logger } from './logger';
 import { ensureStoreDefinitions } from './store-setup';
-import { JobNotRetryableError, listJobs, retryJob } from './sync-log';
+import {
+  JobNotRetryableError,
+  latestCatalogExport,
+  listJobs,
+  retryJob,
+} from './sync-log';
 import { UserErrorsError, formatUserError } from './user-errors';
 
 /**
@@ -189,6 +195,27 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
   router.get('/catalog/candidates', async (_req, res) => {
     const { graphql } = deps.contextFor(res);
     res.json(await listCandidateProducts(graphql));
+  });
+
+  router.get('/catalog/export', async (_req, res) => {
+    const { shop } = deps.contextFor(res);
+    res.json(await latestCatalogExport(deps.prisma, shop));
+  });
+
+  router.post('/catalog/export', async (_req, res) => {
+    const { shop } = deps.contextFor(res);
+    const { alreadyRunning } = await requestCatalogExport(deps.prisma, shop);
+
+    if (alreadyRunning) {
+      logger.info('Catalog export already in flight; not starting a second', {
+        shop,
+      });
+    }
+
+    // 202, not 201: a bulk operation finishes minutes later, so there is
+    // nothing created to point at. The body is the same shape GET returns, so
+    // the screen can render the queued job without a second request.
+    res.status(202).json(await latestCatalogExport(deps.prisma, shop));
   });
 
   router.get('/jobs', async (_req, res) => {
