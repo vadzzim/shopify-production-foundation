@@ -87,6 +87,43 @@ only `DATABASE_URL`** — and putting the scopes in `.env` as well is actively
 worse, because `[access_scopes]` in `shopify.app.toml` is what the merchant
 granted and a disagreement puts the app in a scope-update loop.
 
+#### When the Cloudflare tunnel will not start
+
+`shopify app dev` opens a Cloudflare Quick Tunnel by default, and it fails on
+some networks with `Could not start Cloudflare tunnel: max retries reached`.
+That is a connectivity problem between the machine and Cloudflare, not a problem
+with the app — `config link` having succeeded is the proof, since the app,
+organisation and dev store were all resolved before the tunnel was attempted.
+
+Three ways forward, in the order worth trying:
+
+```bash
+shopify app dev --use-localhost          # no tunnel at all
+shopify app dev --tunnel-url=https://<your-ngrok>.ngrok-free.app   # own tunnel
+shopify app dev                          # just retry; the failure is often transient
+```
+
+**`--use-localhost` is the right default for this project today.** The CLI
+serves the app over `https://localhost:3458` with a certificate it generates
+itself through mkcert, and runs a TLS reverse proxy on that port which forwards
+to the app — so the Express server keeps serving plain HTTP on whatever port the
+CLI assigns, and `HOST` arrives as `https://localhost:3458`. Needs Shopify CLI
+3.80 or newer, and `--localhost-port` overrides the port.
+
+The catch is what localhost cannot reach: Shopify features that **call the app**
+rather than being called by it — webhooks, app proxy, Flow actions — and
+anything tested from another device, such as POS. Today that costs nothing,
+because the webhook receiver is phase 3 and no subscriptions are declared. From
+phase 3 onwards this option stops being enough and a real tunnel is required;
+that is the point at which `--tunnel-url` with ngrok, or a working Cloudflare
+tunnel, becomes mandatory rather than a preference.
+
+On first run mkcert may ask to install its root certificate into the Windows
+trust store. Under WSL it installs into Linux only, and the Windows browser then
+shows a certificate error until the root CA is added manually — Shopify's
+[networking options](https://shopify.dev/docs/apps/build/cli-for-apps/networking-options)
+page has the steps.
+
 #### Running the server without the CLI
 
 `pnpm --filter admin-app dev` starts the same server, and then every variable in
