@@ -2,12 +2,12 @@ import type { Session } from '@shopify/shopify-api';
 import { shopifyApp } from '@shopify/shopify-app-express';
 import { PrismaSessionStorage } from '@shopify/shopify-app-session-storage-prisma';
 
-import type { AdminGraphql, AdminGraphqlResponse } from './admin-graphql';
+import { errorsFromThrown, type AdminGraphql } from './admin-graphql';
 import { prisma } from './db';
 import { env } from './env';
 import { logger } from './logger';
 import { resolveApiVersion } from './resolve-api-version';
-import { ensureStoreDefinitions } from './store-setup';
+import { prepareStoreAfterAuth } from './store-preparation';
 
 /**
  * The Shopify integration.
@@ -61,27 +61,18 @@ export const shopify = shopifyApp({
   useOnlineTokens: true,
   sessionStorage: new PrismaSessionStorage(prisma),
   hooks: {
+    // Preparation is not inlined here. `afterAuth` only ever fires for the
+    // online session when `useOnlineTokens` is on — the adapter returns from
+    // the offline callback before reaching the hook — and getting that wrong
+    // once already meant a fresh install silently had no definitions. The logic
+    // and the reasoning live in store-preparation.ts, where a test can reach
+    // them.
     afterAuth: async ({ session }) => {
-      // afterAuth fires for both sessions when online tokens are on. Store
-      // preparation is per shop, not per staff member, so it runs on the
-      // offline pass and uses the offline token - the one background work will
-      // use later, which makes this the honest test of it.
-      if (session.isOnline) return;
-
-      try {
-        const report = await ensureStoreDefinitions(adminGraphqlFor(session));
-        logger.info(`Store prepared for ${session.shop}`, report.results);
-      } catch (error) {
-        // A failed definition must not block the install: the merchant would be
-        // left with an app they cannot open and no way to retry. It is logged
-        // here and the app offers "Prepare store" so the failure is visible and
-        // actionable rather than silent.
-        logger.error(
-          `Store preparation failed for ${session.shop}; the app is installed ` +
-            `but the theme's metafields may be missing. Retry from the app.`,
-          error,
-        );
-      }
+      await prepareStoreAfterAuth(session.shop, {
+        loadOfflineSession,
+        graphqlFor: adminGraphqlFor,
+        log: logger,
+      });
     },
   },
 });
@@ -92,12 +83,33 @@ export const shopify = shopifyApp({
  * `retries` lets the SDK re-send a request Shopify throttled. It is the safety
  * net, not the strategy: loops pace themselves with the throttle gate in
  * `throttle.ts` so that the common case never spends a request being rejected.
+ *
+ * The `catch` is not defensive padding. `GraphqlClient.request()` throws on
+ * every kind of failure rather than returning the `errors` field its response
+ * type declares, so without this translation a Shopify outage or a rejected
+ * document would bypass `unwrap` entirely and reach the client as a generic
+ * 500 with no reason attached.
  */
 export function adminGraphqlFor(session: Session): AdminGraphql {
   const client = new shopify.api.clients.Graphql({ session });
 
   return async <T>(document: string, variables?: Record<string, unknown>) => {
-    const response = await client.request<T>(document, { variables, retries: 2 });
-    return response as AdminGraphqlResponse<T>;
+    try {
+      return await client.request<T>(document, { variables, retries: 2 });
+    } catch (error) {
+      return { errors: errorsFromThrown(error) };
+    }
   };
+}
+
+/**
+ * The shop's offline session, read from storage.
+ *
+ * `shopify.ensureValidOfflineSession()` looks like the method for this and is
+ * not usable: it throws unless the `expiringOfflineAccessTokens` future flag is
+ * on, which it is not. This is what that helper does underneath.
+ */
+async function loadOfflineSession(shop: string): Promise<Session | undefined> {
+  const offlineId = shopify.api.session.getOfflineId(shop);
+  return shopify.config.sessionStorage.loadSession(offlineId);
 }
