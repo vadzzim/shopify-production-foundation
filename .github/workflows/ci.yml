@@ -14,6 +14,34 @@ jobs:
   app:
     name: App — typecheck, lint, test
     runs-on: ubuntu-latest
+
+    # A real PostgreSQL, because two of the guarantees phase 3 rests on are
+    # properties of the database and not of our code: `ON CONFLICT DO NOTHING`
+    # making a duplicate webhook a no-op (rule 10), and `FOR UPDATE SKIP LOCKED`
+    # handing one job to exactly one of two workers (rule 9). A mocked Prisma
+    # can only confirm that the method we meant to call was called, so those
+    # suites talk to a server — and they skip themselves when DATABASE_URL is
+    # unset, which is why it is set here.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nordlys
+          POSTGRES_PASSWORD: nordlys
+          POSTGRES_DB: nordlys
+        ports:
+          - 5432:5432
+        # Without this the job races the container: `migrate deploy` would run
+        # against a server that has not finished initialising.
+        options: >-
+          --health-cmd "pg_isready -U nordlys"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://nordlys:nordlys@localhost:5432/nordlys?schema=public
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +58,11 @@ jobs:
       # before typecheck. No database is needed for that — generation reads the
       # schema file, not the server.
       - run: pnpm install --frozen-lockfile
+      # `migrate deploy`, not `migrate dev`: it applies the migration files in
+      # the repository and nothing else. `dev` would generate a new migration
+      # from a schema drift, which is exactly the thing rule 11 exists to stop —
+      # and in CI it would do it silently.
+      - run: pnpm prisma migrate deploy
       - run: pnpm typecheck
       - run: pnpm lint
       # `pnpm test -- --coverage` does not work here: pnpm 10 forwards the `--`
