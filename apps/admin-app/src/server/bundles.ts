@@ -612,14 +612,66 @@ interface NewBundleItem {
   position: number;
 }
 
+/** The handle every generated routine set gets, before its number. */
+const HANDLE_PREFIX = 'routine-set-';
+
+/** The same prefix, as the pattern that reads a number back off a handle. */
+const HANDLE_ORDINAL = /^routine-set-(\d+)$/;
+
+/**
+ * The next number no routine set in this shop has used.
+ *
+ * Not the row count. The count is how many sets exist, and the handles are how
+ * they are named — two different things the moment one is deleted. A shop that
+ * created sets 1 to 21 and deleted the first ten has eleven rows and handles
+ * numbered 12 to 21, so counting suggested `routine-set-12` and every candidate
+ * after it was already taken: the create failed, and kept failing however many
+ * times the merchant pressed the button. Numbering from the highest handle in
+ * use makes a deletion free a number nothing wants back rather than one the
+ * next insert is going to ask for.
+ *
+ * Reading the handles rather than asking PostgreSQL for a maximum: they are the
+ * strings `routine-set-9` and `routine-set-10`, which sort the wrong way round
+ * as text, so `ORDER BY handle DESC LIMIT 1` would answer 9. A shop has tens of
+ * these, not thousands.
+ */
+async function nextHandleOrdinal(
+  prisma: PrismaClient,
+  shop: string,
+): Promise<number> {
+  const rows = await prisma.bundle.findMany({
+    where: { shop, handle: { startsWith: HANDLE_PREFIX } },
+    select: { handle: true },
+  });
+
+  let highest = 0;
+
+  for (const row of rows) {
+    const digits = HANDLE_ORDINAL.exec(row.handle)?.[1];
+    if (digits === undefined) continue;
+
+    // A handle a merchant renamed by hand, or one from a future numbering
+    // scheme, is skipped rather than guessed at.
+    const ordinal = Number(digits);
+    if (Number.isSafeInteger(ordinal) && ordinal > highest) highest = ordinal;
+  }
+
+  return highest + 1;
+}
+
 /**
  * Insert the bundle, letting the database decide whether the handle is free.
  *
- * The alternative - count the rows, build a handle, check it is unused, insert -
- * is a race between the check and the insert (rule 10). Here the unique index
- * on `(shop, handle)` is the check: on a collision Prisma raises P2002 and the
- * next candidate is tried. Bounded, because an unbounded retry on a persistent
+ * The alternative - build a handle, check it is unused, insert - is a race
+ * between the check and the insert (rule 10). Here the unique index on
+ * `(shop, handle)` is the check: on a collision Prisma raises P2002 and the next
+ * candidate is tried. Bounded, because an unbounded retry on a persistent
  * constraint failure is an infinite loop rather than resilience.
+ *
+ * The starting number is a hint, not a claim — see {@link nextHandleOrdinal}.
+ * It is read before the loop rather than inside it because two merchants
+ * clicking at once is what the retry is for, and re-reading would have both of
+ * them walk the same candidates in step.
  */
 async function insertBundleWithUniqueHandle(
   prisma: PrismaClient,
@@ -627,17 +679,17 @@ async function insertBundleWithUniqueHandle(
   items: readonly NewBundleItem[],
   maxAttempts = 10,
 ) {
-  const existing = await prisma.bundle.count({ where: { shop } });
+  const first = await nextHandleOrdinal(prisma, shop);
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const ordinal = existing + attempt + 1;
+    const ordinal = first + attempt;
 
     try {
       return await prisma.bundle.create({
         data: {
           shop,
-          title: `Routine set ${ordinal}`,
-          handle: `routine-set-${ordinal}`,
+          title: `Routine set ${String(ordinal)}`,
+          handle: `${HANDLE_PREFIX}${String(ordinal)}`,
           items: { create: [...items] },
         },
         include: { items: { orderBy: { position: 'asc' } } },
