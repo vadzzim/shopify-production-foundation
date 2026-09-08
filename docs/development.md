@@ -26,6 +26,26 @@ pnpm prisma migrate dev
 If PostgreSQL is already installed locally, skip Docker and set `DATABASE_URL`
 in `.env`.
 
+**A second project cloned from this base** runs alongside the first: Compose
+names the container and the volume after the directory, so the only collision
+is the host port. Set `POSTGRES_PORT` in `.env` — it is what `docker-compose.yml`
+binds — and point `DATABASE_URL` at the same port.
+
+What that sequence should get you, on a clone with nothing else set up:
+
+| Command | Expected |
+|---|---|
+| `pnpm install` | ends with `postinstall$ prisma generate` — the client is typed before anything is compiled |
+| `pnpm typecheck` / `pnpm lint` | clean |
+| `pnpm test` **without** a database | `212 passed \| 50 skipped` — the four `*.integration.test.ts` files skip themselves |
+| `pnpm test` **with** `DATABASE_URL` and migrations applied | `262 passed` |
+| `pnpm --filter admin-app dev` without app credentials | exits 1 naming `SHOPIFY_API_KEY` and `SHOPIFY_API_SECRET`. That is the zod check in `packages/shared/src/env.ts` doing its job, not a broken install |
+
+Those numbers are from a real rehearsal — a fresh `git clone`, its own Compose
+database on another port, nothing shared with the working copy — rather than
+from reasoning about what should happen. They are worth updating when the suite
+grows: a clone that gets a different number should find out from this table.
+
 Then:
 
 ```bash
