@@ -1,20 +1,39 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# Shopify CLI owns this file. `shopify app config link` rewrites it wholesale
+# and `shopify app dev` edits parts of it, so comments here do not reliably
+# survive — the reasoning lives in docs/development.md instead.
+#
+# Two values need checking after any CLI command touches this file:
+#   api_version  must stay 2026-07 (ADR-0009). The CLI resets it to its own
+#                latest, which today is a release candidate.
+#   scopes       must match SHOPIFY_SCOPES in .env.example.
+# `pnpm test` fails if the first one drifts.
 
 client_id = "9a486fecc182b3e1ffbf782dce1c273c"
+name = "nordlys"
+handle = "nordlys"
+
+# Rewritten by `shopify app dev` on every run: the tunnel URL is ephemeral
+# (ADR-0008), so this is only a placeholder.
 application_url = "https://example.com"
 embedded = true
-name = "nordlys"
+
+# A monorepo, so the CLI is told where the web process is rather than left to
+# scan a tree that also contains theme/.
+web_directories = ["apps/admin-app"]
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_inventory,read_metaobject_definitions,read_orders,read_products,write_inventory,write_metaobject_definitions,write_products"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+# Host is rewritten by `shopify app dev`; the path is ours, and matches
+# `shopify.config.auth.callbackPath` in apps/admin-app/src/server/shopify.ts.
+redirect_urls = ["https://example.com/api/auth/callback"]
 
 [webhooks]
-api_version = "2026-10"
+# Pinned to the constant in packages/shared/src/api-version.ts (rule 1,
+# ADR-0009). TOML cannot import it, so a test asserts the two agree.
+api_version = "2026-07"
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true
+include_config_on_deploy = true

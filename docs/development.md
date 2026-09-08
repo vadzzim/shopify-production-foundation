@@ -51,6 +51,34 @@ nothing to check, and even with one the browser would refuse to frame an
 So the app needs an app record in the dashboard and an HTTPS tunnel. Shopify CLI
 provides both.
 
+#### Shopify CLI owns `shopify.app.toml`
+
+Worth knowing before editing it: `shopify app config link` **rewrites the file
+wholesale**. Comments are deleted, keys are reordered, and two values are
+replaced with the CLI's own idea of them:
+
+- **`[webhooks] api_version` is reset to the CLI's latest**, which on
+  2026-09-08 meant `2026-10` — a release candidate, which
+  [ADR-0009](adr/0009-admin-api-version.md) refuses precisely because
+  release candidates take backwards-incompatible changes without notice. A
+  webhook registered at one version and parsed by code written for another is
+  the bug rule 1 exists to prevent.
+- **`[auth] redirect_urls` is derived**, and the CLI wrote `/api/auth` rather
+  than this app's callback path. During `shopify app dev` it updates the
+  dashboard from `auth_callback_path` in `shopify.web.toml`, so OAuth still
+  works, but the committed file ends up describing something else.
+
+The guard is a test: `packages/shared/src/api-version.test.ts` reads the TOML
+and fails when `api_version` no longer matches the pinned constant. **If
+`pnpm test` starts failing on that assertion, the CLI repinned the version** —
+set it back to `2026-07` rather than updating the test.
+
+`client_id` is committed. It is public — the same value the browser receives as
+`SHOPIFY_API_KEY` — and the CLI writes it into this file regardless, so keeping
+it out is a fight with the tool rather than a security measure. Starting a
+client project from this base means running `shopify app config link` and
+letting it be replaced.
+
 #### First time: link the app
 
 **Do not run `shopify app init`.** It scaffolds a *new* project from Shopify's
