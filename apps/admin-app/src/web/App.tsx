@@ -7,6 +7,7 @@ import {
   fetchBundles,
   prepareStore,
 } from './api';
+import { SyncLog } from './SyncLog';
 
 /**
  * The bundle index.
@@ -260,6 +261,14 @@ export function App(): React.JSX.Element {
           </s-table>
         </s-section>
       )}
+
+      {/*
+        Below the bundles rather than behind a tab. The sync log is not a
+        separate feature — it is the answer to "why does the storefront not
+        show what I just changed", which is a question asked while looking at
+        this screen.
+      */}
+      <SyncLog />
     </s-page>
   );
 }
