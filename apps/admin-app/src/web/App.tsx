@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ROUTINE_STEPS, type Bundle, type RoutineStep } from '@nordlys/shared';
+import {
+  ROUTINE_STEPS,
+  type Bundle,
+  type CatalogCandidates,
+  type RoutineStep,
+} from '@nordlys/shared';
 
 import {
   ApiRequestError,
   createStarterBundle,
   fetchBundles,
+  fetchCandidates,
   prepareStore,
 } from './api';
+import { BundleEditor } from './BundleEditor';
 import { SyncLog } from './SyncLog';
 
 /**
@@ -123,6 +130,10 @@ export function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>({ status: 'loading' });
   const [pending, setPending] = useState<PendingAction>(null);
   const [actionError, setActionError] = useState<ApiRequestError | null>(null);
+  const [editing, setEditing] = useState<Bundle | null>(null);
+  const [candidates, setCandidates] = useState<CatalogCandidates | null>(null);
+  const [candidatesError, setCandidatesError] =
+    useState<ApiRequestError | null>(null);
 
   const load = useCallback(async () => {
     setScreen({ status: 'loading' });
@@ -172,6 +183,40 @@ export function App(): React.JSX.Element {
       setPending(null);
     }
   }, []);
+
+  /**
+   * Open the editor, fetching the pickable products the first time.
+   *
+   * Lazily, and once: the candidate list is a walk over the catalog behind the
+   * Admin API's rate limit, and a merchant who never edits anything should not
+   * pay for it on page load.
+   */
+  const openEditor = useCallback(
+    (bundle: Bundle) => {
+      setEditing(bundle);
+      if (candidates !== null) return;
+
+      setCandidatesError(null);
+      void (async () => {
+        try {
+          setCandidates(await fetchCandidates());
+        } catch (error) {
+          // Not fatal to the editor: the slot a set already has stays
+          // selectable, so a merchant can still rename it or change its status.
+          setCandidatesError(describeError(error));
+        }
+      })();
+    },
+    [candidates],
+  );
+
+  const onEdited = useCallback(
+    (message: string) => {
+      shopify.toast.show(message);
+      void load();
+    },
+    [load],
+  );
 
   const bundles = screen.status === 'ready' ? screen.bundles : [];
   const busy = pending !== null;
@@ -238,6 +283,7 @@ export function App(): React.JSX.Element {
                 </s-table-header>
               ))}
               <s-table-header listSlot="labeled">Status</s-table-header>
+              <s-table-header listSlot="inline">Edit</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {bundles.map((bundle) => (
@@ -255,6 +301,17 @@ export function App(): React.JSX.Element {
                       {label(bundle.status)}
                     </s-badge>
                   </s-table-cell>
+                  <s-table-cell>
+                    <s-button
+                      variant="tertiary"
+                      accessibilityLabel={`Edit ${bundle.title}`}
+                      onClick={() => {
+                        openEditor(bundle);
+                      }}
+                    >
+                      Edit
+                    </s-button>
+                  </s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>
@@ -269,6 +326,24 @@ export function App(): React.JSX.Element {
         this screen.
       */}
       <SyncLog />
+
+      {/*
+        Mounted only while a set is being edited, and keyed by its id: opening a
+        different set is a different form, and a component left mounted would
+        carry the previous set's unsaved values into it.
+      */}
+      {editing && (
+        <BundleEditor
+          key={editing.id}
+          bundle={editing}
+          candidates={candidates}
+          candidatesError={candidatesError}
+          onClose={() => {
+            setEditing(null);
+          }}
+          onChanged={onEdited}
+        />
+      )}
     </s-page>
   );
 }
