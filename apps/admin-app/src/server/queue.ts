@@ -38,6 +38,52 @@ export interface QueueJob {
   maxAttempts: number;
   correlationId: string;
   webhookId: string | null;
+  /**
+   * Which worker holds this claim.
+   *
+   * Together with `attempts` this identifies not just the job but *this attempt
+   * at it*, which is what every state transition below is conditioned on. See
+   * {@link ClaimLost}.
+   */
+  lockedBy: string;
+}
+
+/**
+ * A state transition that did not apply because the claim was no longer held.
+ *
+ * The row moved on: the lock went stale, the reaper released it, and another
+ * worker is now on a later attempt. The transition is dropped rather than
+ * forced, and the caller says so in the log.
+ */
+export type ClaimOutcome = 'applied' | 'claim_lost';
+
+/**
+ * The identity of one attempt, as every transition below matches on it.
+ *
+ * `id` alone is not enough. A worker whose lock expires — a slow Admin API
+ * call, a bulk export download, a process paused long enough for the reaper to
+ * act — is still running, and still believes the job is its own. When it
+ * finishes and writes by id, it writes over an attempt some *other* worker is
+ * in the middle of: marking that attempt SUCCEEDED, clearing its lock, and
+ * letting a third worker claim the row while the second one is still running
+ * it. The three columns together mean the late write finds no row and is
+ * dropped, which is the correct outcome — the current attempt owns the row.
+ */
+type ClaimedBy = Pick<QueueJob, 'id' | 'attempts' | 'lockedBy'>;
+
+/** The rest of {@link ClaimedBy}, matched so a released row is not revived. */
+function heldClaim(job: ClaimedBy): {
+  id: string;
+  status: 'RUNNING';
+  attempts: number;
+  lockedBy: string;
+} {
+  return {
+    id: job.id,
+    status: 'RUNNING',
+    attempts: job.attempts,
+    lockedBy: job.lockedBy,
+  };
 }
 
 export interface EnqueueInput {
@@ -246,15 +292,28 @@ export async function claimJobs(
     maxAttempts: row.maxAttempts,
     correlationId: row.correlationId,
     webhookId: row.webhookId,
+    // The statement above set it to exactly this, so there is nothing to read
+    // back. It travels on the job because every transition matches on it.
+    lockedBy: workerId,
   }));
 }
 
+/**
+ * Mark this attempt succeeded — if it is still the attempt that owns the row.
+ *
+ * `updateMany` rather than `update`, and not for style: `update` addresses one
+ * row by id and throws when the filter matches nothing, so a conditional write
+ * would have to be a caught exception. `updateMany` returns a count, and a
+ * count of zero is the answer to "is this claim still mine?" — asked and
+ * answered in the same statement, with no read-then-write gap for a reaper to
+ * land in.
+ */
 export async function completeJob(
   prisma: PrismaClient,
-  jobId: string,
-): Promise<void> {
-  await prisma.job.update({
-    where: { id: jobId },
+  job: ClaimedBy,
+): Promise<ClaimOutcome> {
+  const updated = await prisma.job.updateMany({
+    where: heldClaim(job),
     data: {
       status: 'SUCCEEDED',
       finishedAt: new Date(),
@@ -263,6 +322,8 @@ export async function completeJob(
       lastError: null,
     },
   });
+
+  return updated.count === 1 ? 'applied' : 'claim_lost';
 }
 
 /**
@@ -282,11 +343,11 @@ export async function completeJob(
  */
 export async function rescheduleJob(
   prisma: PrismaClient,
-  jobId: string,
+  job: ClaimedBy,
   runAt: Date,
-): Promise<void> {
-  await prisma.job.update({
-    where: { id: jobId },
+): Promise<ClaimOutcome> {
+  const updated = await prisma.job.updateMany({
+    where: heldClaim(job),
     data: {
       status: 'PENDING',
       runAt,
@@ -295,6 +356,8 @@ export async function rescheduleJob(
       attempts: { decrement: 1 },
     },
   });
+
+  return updated.count === 1 ? 'applied' : 'claim_lost';
 }
 
 export interface BackoffOptions {
@@ -331,9 +394,20 @@ export function backoffMs(
 
 export interface FailJobOptions extends BackoffOptions {
   now?: () => Date;
+  /**
+   * Skip the remaining attempts: this failure cannot be retried into success.
+   *
+   * A malformed payload and a job kind this deploy has no handler for are the
+   * cases. The caller used to express it by passing `attempts: maxAttempts`
+   * instead of the job's real attempt count, which no longer works — the write
+   * is now conditioned on that count matching the row — and was a poor way to
+   * say it in any case: the job's own numbers had to be falsified to carry one
+   * bit of the caller's intent.
+   */
+  permanent?: boolean;
 }
 
-export type FailOutcome = 'retry_scheduled' | 'dead';
+export type FailOutcome = 'retry_scheduled' | 'dead' | 'claim_lost';
 
 /**
  * Record a failure: schedule a retry, or move the job to the dead-letter state.
@@ -343,18 +417,23 @@ export type FailOutcome = 'retry_scheduled' | 'dead';
  * fail halfway; a status transition cannot come apart, and it keeps a job's
  * whole history at one id — which is what the sync log shows and what a manual
  * retry acts on.
+ *
+ * Conditioned on the claim, like the two transitions above: a worker whose lock
+ * expired must not record its failure over the attempt that replaced it, or a
+ * job another worker is running right now goes to FAILED and is claimed a third
+ * time while the second attempt is still in flight.
  */
 export async function failJob(
   prisma: PrismaClient,
-  job: Pick<QueueJob, 'id' | 'attempts' | 'maxAttempts'>,
+  job: ClaimedBy & Pick<QueueJob, 'maxAttempts'>,
   error: string,
   options: FailJobOptions = {},
 ): Promise<FailOutcome> {
   const now = (options.now ?? (() => new Date()))();
-  const exhausted = job.attempts >= job.maxAttempts;
+  const exhausted = options.permanent === true || job.attempts >= job.maxAttempts;
 
-  await prisma.job.update({
-    where: { id: job.id },
+  const updated = await prisma.job.updateMany({
+    where: heldClaim(job),
     data: {
       status: exhausted ? 'DEAD' : 'FAILED',
       // Truncated: `lastError` is rendered in the sync log and can be a
@@ -370,6 +449,8 @@ export async function failJob(
           }),
     },
   });
+
+  if (updated.count === 0) return 'claim_lost';
 
   return exhausted ? 'dead' : 'retry_scheduled';
 }

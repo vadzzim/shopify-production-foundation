@@ -42,6 +42,41 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
     await prisma.$disconnect();
   });
 
+  /**
+   * One job, two claims: the first worker's lock went stale and a second worker
+   * now holds the row.
+   *
+   * Reproduced through the real sequence rather than by editing columns — claim,
+   * backdate the lock, reap, claim again — so what the transitions are tested
+   * against is a row PostgreSQL actually produced.
+   */
+  async function lostClaim(): Promise<{
+    stale: Awaited<ReturnType<typeof claimJobs>>[number];
+    current: Awaited<ReturnType<typeof claimJobs>>[number];
+  }> {
+    await enqueue(prisma, {
+      shop: SHOP,
+      kind: 'catalog.export',
+      payload: {},
+      correlationId: 'c1',
+    });
+
+    const stale = only(await claimJobs(prisma, 'worker-slow', 1));
+
+    await prisma.job.update({
+      where: { id: stale.id },
+      data: { lockedAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+    await reapStaleJobs(prisma);
+
+    const current = only(await claimJobs(prisma, 'worker-fresh', 1));
+
+    expect(current.id).toBe(stale.id);
+    expect(current.attempts).toBe(stale.attempts + 1);
+
+    return { stale, current };
+  }
+
   describe('acceptDelivery', () => {
     const delivery = {
       webhookId: 'delivery-1',
@@ -273,6 +308,47 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
       // And a dead job is not picked up again.
       expect(await claimJobs(prisma, 'worker-a', 5)).toEqual([]);
     });
+
+    it('skips the remaining attempts when the failure is permanent', async () => {
+      // The caller used to say this by passing a falsified attempt count. It
+      // now says it in words, because the write is conditioned on that count
+      // matching the row.
+      await enqueue(prisma, {
+        shop: SHOP,
+        kind: 'order.received',
+        payload: { topic: 'orders/create', body: {} },
+        correlationId: 'c1',
+        maxAttempts: 5,
+      });
+
+      const claimed = only(await claimJobs(prisma, 'worker-a', 1));
+      const outcome = await failJob(prisma, claimed, 'payload is nonsense', {
+        permanent: true,
+      });
+
+      expect(outcome).toBe('dead');
+      expect(
+        (await prisma.job.findFirstOrThrow({ where: { id: claimed.id } }))
+          .status,
+      ).toBe('DEAD');
+    });
+
+    it('does not record a failure against an attempt it no longer owns', async () => {
+      const { stale, current } = await lostClaim();
+
+      expect(await failJob(prisma, stale, 'the ERP refused')).toBe(
+        'claim_lost',
+      );
+
+      // Still the second worker's, still running, and with no error written
+      // against an attempt that has not finished.
+      const row = await prisma.job.findFirstOrThrow({ where: { id: stale.id } });
+      expect(row.status).toBe('RUNNING');
+      expect(row.lockedBy).toBe(current.lockedBy);
+      // The reaper's note is still there — nothing has overwritten it with a
+      // failure belonging to an attempt that has not finished.
+      expect(row.lastError).not.toBe('the ERP refused');
+    });
   });
 
   describe('completeJob', () => {
@@ -285,7 +361,7 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
       });
 
       const claimed = only(await claimJobs(prisma, 'worker-a', 1));
-      await completeJob(prisma, claimed.id);
+      await completeJob(prisma, claimed);
 
       const row = await prisma.job.findFirstOrThrow({
         where: { id: claimed.id },
@@ -293,6 +369,34 @@ describe.skipIf(!hasDatabase)('the queue, against PostgreSQL', () => {
       expect(row.status).toBe('SUCCEEDED');
       expect(row.lockedBy).toBeNull();
       expect(row.finishedAt).not.toBeNull();
+    });
+
+    it('does not mark another worker’s attempt succeeded', async () => {
+      // The race this guards: a worker whose lock went stale — a slow Admin API
+      // call, an export download — is still running and still believes the job
+      // is its own. Writing by id alone, it would mark the *second* worker's
+      // in-flight attempt SUCCEEDED and clear its lock, freeing the row for a
+      // third claim while the second attempt is still going.
+      const { stale, current } = await lostClaim();
+
+      expect(await completeJob(prisma, stale)).toBe('claim_lost');
+
+      const row = await prisma.job.findFirstOrThrow({ where: { id: stale.id } });
+      expect(row.status).toBe('RUNNING');
+      expect(row.lockedBy).toBe(current.lockedBy);
+      expect(row.finishedAt).toBeNull();
+    });
+
+    it('applies to the worker that does still hold the claim', async () => {
+      // The other side of the same test: the guard must not reject the write it
+      // exists to protect.
+      const { current } = await lostClaim();
+
+      expect(await completeJob(prisma, current)).toBe('applied');
+      expect(
+        (await prisma.job.findFirstOrThrow({ where: { id: current.id } }))
+          .status,
+      ).toBe('SUCCEEDED');
     });
   });
 

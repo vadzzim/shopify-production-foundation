@@ -64,6 +64,7 @@ function jobFor(kind: QueueJob['kind'], payload: unknown): QueueJob {
     maxAttempts: 5,
     correlationId: 'delivery-1',
     webhookId: 'delivery-1',
+    lockedBy: 'worker-test',
   };
 }
 
