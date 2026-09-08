@@ -2,8 +2,11 @@ import {
   apiErrorSchema,
   bundleListResponseSchema,
   bundleSchema,
+  jobListResponseSchema,
+  jobSummarySchema,
   storeSetupReportSchema,
   type Bundle,
+  type JobSummary,
   type StoreSetupReport,
 } from '@nordlys/shared';
 import { z } from 'zod';
@@ -109,4 +112,27 @@ export async function prepareStore(): Promise<StoreSetupReport> {
     { method: 'POST' },
   );
   return report;
+}
+
+export async function fetchJobs(): Promise<JobSummary[]> {
+  const { jobs } = await request('/api/jobs', jobListResponseSchema);
+  return jobs;
+}
+
+/**
+ * Put a failed job back on the queue.
+ *
+ * The server resets the row and lets the worker pick it up, rather than running
+ * the job inline: a manual retry then takes exactly the same path as an
+ * automatic one and cannot behave differently from it. Which is why this
+ * returns a job that is `pending`, not one that has already succeeded — the
+ * screen reloads to find out.
+ */
+export async function retryJob(id: string): Promise<JobSummary> {
+  const { job } = await request(
+    `/api/jobs/${encodeURIComponent(id)}/retry`,
+    z.object({ job: jobSummarySchema }),
+    { method: 'POST' },
+  );
+  return job;
 }

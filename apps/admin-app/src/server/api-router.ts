@@ -14,6 +14,7 @@ import {
 } from './bundles';
 import { logger } from './logger';
 import { ensureStoreDefinitions } from './store-setup';
+import { JobNotRetryableError, listJobs, retryJob } from './sync-log';
 import { UserErrorsError, formatUserError } from './user-errors';
 
 /**
@@ -82,6 +83,14 @@ export const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => 
     return;
   }
 
+  if (error instanceof JobNotRetryableError) {
+    // 404 rather than 409: from the caller's side a job that is not theirs, not
+    // there, or not in a retryable state are the same answer — this id is not
+    // something you can retry — and the message says which.
+    sendError(res, 'not_found', error.message);
+    return;
+  }
+
   if (error instanceof UserErrorsError) {
     logger.error(`${error.operation} returned userErrors`, {
       userErrors: error.userErrors,
@@ -129,6 +138,17 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     const { shop, graphql } = deps.contextFor(res);
     const bundle = await createStarterBundle(deps.prisma, graphql, shop);
     res.status(201).json({ bundle });
+  });
+
+  router.get('/jobs', async (_req, res) => {
+    const { shop } = deps.contextFor(res);
+    res.json({ jobs: await listJobs(deps.prisma, shop) });
+  });
+
+  router.post('/jobs/:id/retry', async (req, res) => {
+    const { shop } = deps.contextFor(res);
+    const job = await retryJob(deps.prisma, shop, req.params.id);
+    res.json({ job });
   });
 
   router.post('/store/prepare', async (_req, res) => {
