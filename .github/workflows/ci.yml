@@ -6,8 +6,14 @@ on:
     branches: [main]
 
 env:
-  # Keep in step with .nvmrc. Node 20 reached end of life on 2026-04-30 and no
-  # longer receives security patches.
+  # The Node the *jobs* run on. Keep in step with .nvmrc — Node 20 reached end
+  # of life on 2026-04-30 and no longer receives security patches.
+  #
+  # Not the same thing as the Node the *actions* run on. Every `uses:` below is
+  # a program with its own runtime, declared in its own action.yml, and setting
+  # this variable does nothing for those. That is why they are pinned to their
+  # node24 majors: GitHub removes Node 20 from hosted runners on 2026-09-16,
+  # after which an action still targeting it stops working rather than warning.
   NODE_VERSION: 24
 
 jobs:
@@ -43,16 +49,20 @@ jobs:
       DATABASE_URL: postgresql://nordlys:nordlys@localhost:5432/nordlys?schema=public
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No `version:` here. The action refuses to run when a version is given
       # both in its config and in package.json's `packageManager`, and
       # `packageManager` is the better source: it pins the exact version rather
       # than a major, and Corepack reads the same field locally.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+          # Still needed, and not redundant with the automatic caching
+          # setup-node v5 introduced for projects with a `packageManager` field:
+          # v6 narrowed that automatic detection to npm only. Without this line
+          # a pnpm project silently stops caching its store.
           cache: pnpm
       # The root postinstall runs `prisma generate`, so @prisma/client is typed
       # before typecheck. No database is needed for that — generation reads the
@@ -69,7 +79,7 @@ jobs:
       # to vitest, which reads both tokens as test-name filters and produces no
       # coverage at all — quietly, with a green run. Hence a named script.
       - run: pnpm test:coverage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -79,8 +89,8 @@ jobs:
     name: Theme — theme-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm i -g @shopify/cli@latest
@@ -90,10 +100,10 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -107,8 +117,8 @@ jobs:
     # (docs/development.md). Without it there is nothing to measure.
     if: vars.PREVIEW_THEME_URL != ''
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run Lighthouse against the preview theme
@@ -118,7 +128,7 @@ jobs:
             --collect.numberOfRuns=3 \
             --upload.target=filesystem \
             --upload.outputDir=./lhci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: lighthouse
