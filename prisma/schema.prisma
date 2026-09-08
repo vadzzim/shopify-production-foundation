@@ -1,0 +1,103 @@
+// Prisma schema for the admin app and, from phase 3, the sync worker.
+//
+// The database is not a copy of the Shopify catalog: Shopify stays the source of
+// truth for products, inventory and orders (ADR-0007). What lives here is state
+// Shopify has nowhere to put — OAuth sessions, and the bundles this app defines.
+//
+// Schema changes land as migration files under prisma/migrations. `prisma db
+// push` is never used: it applies a diff with no artefact in the repository, so
+// the schema a store runs cannot be reconstructed from history (rule 11).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// OAuth sessions, written and read by PrismaSessionStorage from
+/// @shopify/shopify-app-session-storage-prisma. The column set is dictated by
+/// that adapter — it maps a Session object field by field — so fields are not
+/// removed here even when this app never reads them. The adapter looks the table
+/// up by the model name `Session`; renaming it raises MissingSessionTableError.
+///
+/// Both offline and online sessions live in this table, told apart by isOnline.
+/// Offline sessions carry the token background work uses (webhooks, the worker):
+/// they outlive any staff member's admin session. Online sessions carry a token
+/// scoped to the staff member who is looking at the app right now, with their
+/// permissions and their session's lifetime, and are what user-facing requests
+/// act under.
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean?
+  locale              String?
+  collaborator        Boolean?
+  emailVerified       Boolean?
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+/// A routine set: one product per step, assembled by the merchant in the app and
+/// rendered by the bundle-builder section on the storefront (ADR-0012).
+model Bundle {
+  id        String       @id @default(cuid())
+  /// myshopify.com domain. Every row is scoped to a shop because one deployment
+  /// serves many stores, and a missing shop filter is a cross-tenant data leak
+  /// rather than a bug in one screen.
+  shop      String
+  title     String
+  handle    String
+  status    BundleStatus @default(DRAFT)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  items     BundleItem[]
+
+  @@unique([shop, handle])
+  @@index([shop, status])
+}
+
+/// One product's place in a bundle. Products are referenced by Admin API GID and
+/// never copied: a title cached here would go stale the moment a merchant edits
+/// the product in the admin.
+model BundleItem {
+  id          String      @id @default(cuid())
+  bundleId    String
+  bundle      Bundle      @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  productGid  String
+  routineStep RoutineStep
+  position    Int
+
+  /// A routine set holds at most one product per step. Enforced here rather than
+  /// in application code: a check-then-insert in the app is a race, the unique
+  /// index is not (rule 10).
+  @@unique([bundleId, routineStep])
+  @@index([bundleId])
+}
+
+/// Mirrors the `custom.routine_step` metafield, whose choice list is exactly
+/// cleanse / treat / moisturize (ADR-0003).
+enum RoutineStep {
+  CLEANSE
+  TREAT
+  MOISTURIZE
+}
+
+enum BundleStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}

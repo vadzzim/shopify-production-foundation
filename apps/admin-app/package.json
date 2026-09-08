@@ -1,0 +1,38 @@
+{
+  "name": "admin-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Embedded Shopify admin app: OAuth, session storage, store preparation, bundle management.",
+  "//": "One process serves both halves. An embedded app is loaded in an iframe at SHOPIFY_APP_URL, so the API and the UI must share an origin; Vite runs as Express middleware in development and the built assets are served from dist/ otherwise.",
+  "scripts": {
+    "dev": "tsx watch src/server/index.ts",
+    "start": "tsx src/server/index.ts",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "dependencies": {
+    "@nordlys/shared": "workspace:*",
+    "@prisma/client": "6.19.3",
+    "@shopify/shopify-api": "14.0.1",
+    "@shopify/shopify-app-express": "8.0.1",
+    "@shopify/shopify-app-session-storage-prisma": "10.0.1",
+    "express": "5.2.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@shopify/app-bridge-types": "0.7.2",
+    "@shopify/polaris-types": "1.0.7",
+    "@types/express": "5.0.6",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@types/supertest": "7.2.1",
+    "@vitejs/plugin-react": "6.1.1",
+    "prisma": "6.19.3",
+    "supertest": "7.2.2",
+    "tsx": "4.23.13",
+    "vite": "8.2.2"
+  }
+}
