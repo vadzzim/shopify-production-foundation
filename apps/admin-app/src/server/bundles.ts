@@ -107,27 +107,62 @@ const CATALOG_PAGE_SIZE = 250;
 const MAX_CATALOG_PAGES = 10;
 
 /**
- * Look up the products a set of bundles refers to, in one request.
+ * Ids per `nodes(ids:)` call.
  *
- * One `nodes(ids:)` call rather than one call per product: a bundle list of ten
- * sets is thirty products, and thirty round trips would be thirty times the
+ * Shopify's hard cap: "input arguments that accept an array have a maximum size
+ * of 250", and a query that exceeds it is answered with an error rather than a
+ * truncated result. Confirmed through the Shopify Dev MCP against 2026-07.
+ *
+ * The other ceiling to keep in mind is the 1,000-point cost limit on a single
+ * query. A product node here is about two points — the object, plus the
+ * metafield object; the scalars are free — so a full batch is around 500 and
+ * has room. A field added to `BUNDLE_PRODUCTS` changes that arithmetic.
+ */
+const PRODUCT_LOOKUP_BATCH = 250;
+
+/**
+ * Look up the products a set of bundles refers to.
+ *
+ * One `nodes(ids:)` call per batch rather than one per product: a bundle list of
+ * ten sets is thirty products, and thirty round trips would be thirty times the
  * cost against the same rate-limit bucket for the same data.
+ *
+ * But not one call for all of them either, which is what this used to be. Past
+ * 250 ids Shopify rejects the query outright, so a shop with more than 250
+ * distinct products across its routine sets got an error for the whole list —
+ * and since the editor loads through the same path, the screen that would let
+ * them delete a set to get back under the limit was equally unavailable. Around
+ * 84 routine sets on distinct products is enough to reach that, which is a
+ * catalog a real merchant can have.
+ *
+ * Rule 4: past one batch this is a loop of Admin API calls, so each response
+ * feeds the throttle gate and the next batch waits when the bucket cannot
+ * afford it.
  */
 async function fetchProducts(
   graphql: AdminGraphql,
   gids: readonly string[],
+  throttleOptions: ThrottleGateOptions = {},
 ): Promise<Map<string, ProductNode>> {
   if (gids.length === 0) return new Map();
 
-  const data = unwrap(
-    'BundleProducts',
-    await graphql<BundleProductsData>(BUNDLE_PRODUCTS, { ids: [...gids] }),
-  );
-
+  const gate = createThrottleGate(throttleOptions);
   const byGid = new Map<string, ProductNode>();
-  for (const node of data.nodes) {
-    if (node) byGid.set(node.id, node);
+
+  for (let start = 0; start < gids.length; start += PRODUCT_LOOKUP_BATCH) {
+    await gate.beforeCall();
+
+    const batch = gids.slice(start, start + PRODUCT_LOOKUP_BATCH);
+    const response = await graphql<BundleProductsData>(BUNDLE_PRODUCTS, {
+      ids: batch,
+    });
+    gate.record(response.extensions?.cost);
+
+    for (const node of unwrap('BundleProducts', response).nodes) {
+      if (node) byGid.set(node.id, node);
+    }
   }
+
   return byGid;
 }
 
@@ -178,6 +213,7 @@ export async function listBundles(
   prisma: PrismaClient,
   graphql: AdminGraphql,
   shop: string,
+  throttleOptions: ThrottleGateOptions = {},
 ): Promise<Bundle[]> {
   const rows = await prisma.bundle.findMany({
     // Scoped to the shop, always. One deployment serves many stores, and a
@@ -191,7 +227,7 @@ export async function listBundles(
   const gids = [
     ...new Set(rows.flatMap((row) => row.items.map((item) => item.productGid))),
   ];
-  const products = await fetchProducts(graphql, gids);
+  const products = await fetchProducts(graphql, gids, throttleOptions);
 
   return rows.map((row) => toBundle(row, products));
 }
