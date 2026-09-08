@@ -15,6 +15,12 @@ auth_callback_path = "/api/auth/callback"
 # the default it would otherwise assume is /api/webhooks anyway.
 webhooks_path = "/api/webhooks"
 
+# Without this the CLI assigns a random port on every run. That is harmless with
+# a CLI-managed tunnel, and unusable with `--tunnel-url`: a tunnel you started
+# yourself points at a fixed local port, and a moving target means it forwards
+# to nothing. 3000 also matches PORT in .env.example and the README.
+port = 3000
+
 [commands]
 # The CLI provides SHOPIFY_API_KEY, SHOPIFY_API_SECRET, HOST, SCOPES and PORT to
 # this process as environment variables, which is why none of them belong in

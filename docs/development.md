@@ -99,9 +99,25 @@ Three ways forward, in the order worth trying:
 
 ```bash
 shopify app dev --use-localhost          # no tunnel at all
-shopify app dev --tunnel-url=https://<your-ngrok>.ngrok-free.app   # own tunnel
+shopify app dev --tunnel-url=https://<host>:443                    # own tunnel
 shopify app dev                          # just retry; the failure is often transient
 ```
+
+Two details about `--tunnel-url` that each cost a failed run to discover:
+
+- **The port is required**, even when it is the implicit one. A bare
+  `https://host` is rejected with `Valid format: "https://my-tunnel-url:port"`,
+  so an HTTPS tunnel URL needs `:443` spelled out.
+- **The tunnel is yours to point somewhere.** The CLI does not manage it, and it
+  assigns the app process a random port unless told otherwise — which would
+  leave the tunnel forwarding to nothing. `apps/admin-app/shopify.web.toml`
+  pins `port = 3000`, so the tunnel should forward to 3000.
+
+Any tunnel provider works: ngrok, pinggy, a Cloudflare named tunnel. Free tiers
+usually rotate the hostname, which costs nothing here —
+`automatically_update_urls_on_dev = true` means each `shopify app dev` run
+rewrites the app URL and callback URL in the dashboard to whatever tunnel it was
+given.
 
 **`--use-localhost` is the right default for this project today.** The CLI
 serves the app over `https://localhost:3458` with a certificate it generates
