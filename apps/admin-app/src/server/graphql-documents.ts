@@ -59,17 +59,22 @@ export const CREATE_METAFIELD_DEFINITION = /* GraphQL */ `
 `;
 
 /**
- * Active products with their routine step.
+ * Active products with their routine step, one page at a time.
  *
  * The step is read as a field rather than used as a search filter on purpose:
  * filtering products by a metafield in `query:` requires the definition to have
  * the admin-filterable capability, which this store's definition deliberately
  * does not have. Asking for a filter the definition cannot serve returns
- * everything, silently — so the grouping happens here, over a bounded page.
+ * everything, silently — so the grouping happens in the caller.
+ *
+ * `pageInfo` is selected because that grouping needs to know whether it has
+ * seen the whole catalog. Without it, a step that first appears on product 150
+ * looks identical to a step no product has, and the app would tell the merchant
+ * their catalog is missing something it is not.
  */
 export const ROUTINE_STEP_PRODUCTS = /* GraphQL */ `
-  query RoutineStepProducts($first: Int!, $query: String) {
-    products(first: $first, query: $query) {
+  query RoutineStepProducts($first: Int!, $query: String, $after: String) {
+    products(first: $first, query: $query, after: $after) {
       nodes {
         id
         title
@@ -77,6 +82,10 @@ export const ROUTINE_STEP_PRODUCTS = /* GraphQL */ `
         routineStep: metafield(namespace: "custom", key: "routine_step") {
           value
         }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
