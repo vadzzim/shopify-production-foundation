@@ -16,16 +16,19 @@ catalog export, HMAC-verified idempotent webhook intake, a PostgreSQL queue with
 backoff and a dead-letter state, the worker and the job handlers — exercised by
 integration tests against a real PostgreSQL, not mocks.
 
-**What that does not include: none of it has been verified against a live
-store.** The app has never been opened in a Shopify admin, so no install and no
-webhook delivery has been observed from Shopify's side. That is a missing
-observation rather than missing code, and the two are kept apart deliberately —
-the [roadmap](docs/roadmap.md) carries per-item status and is the authoritative
-list.
+The theme is live on the development store below and can be clicked through.
+**The app and the integration layer cannot be:** neither has been opened in a
+Shopify admin, so no install and no webhook delivery has been observed from
+Shopify's side. That is a missing observation rather than missing code, and the
+two are kept apart deliberately — the [roadmap](docs/roadmap.md) carries
+per-item status and is the authoritative list.
 
 **Live**
-- **Storefront:** not yet published — will be a Shopify preview URL with the
-  development store password
+- **Storefront:** **[ecorn-oj1cb5ll.myshopify.com](https://ecorn-oj1cb5ll.myshopify.com)**,
+  store password **`demo001`**. A Shopify development store, so the storefront
+  sits behind the platform's own password gate and cannot take a real payment.
+  Start on the home page — the bundle builder is the interaction worth reading
+  the code for, and the walkthrough below says what to click
 - **App:** an embedded admin app cannot be opened outside a store's admin, so it
   runs locally; the screens are below and in [`docs/app/`](docs/app/), and the
   deployment topology is in [ADR-0008](docs/adr/0008-hosting-topology.md)
@@ -250,5 +253,5 @@ model mistakes caught in review are documented in
 - The storefront is always password-protected; that is a platform constraint,
   not a setting.
 - Real payments are not possible; test orders go through the Bogus Gateway.
-- The theme will be published as a preview on Shopify's CDN: stable URL, always
-  available, no hosting cost.
+- The theme is published on the store above and served from Shopify's CDN:
+  stable URL, always available, no hosting cost.
