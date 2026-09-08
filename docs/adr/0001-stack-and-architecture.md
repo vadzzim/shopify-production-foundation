@@ -45,6 +45,14 @@ recorded either in the code or in an ADR.
 Express layer for the webhook receiver and the worker.
 **Stage 2:** migrate the app to option 2 (see ADR-0002).
 
+> **Superseded 2026-09-08 for the app.** The staging above rested on option 2
+> meaning hand-written OAuth. It does not:
+> `@shopify/shopify-app-express` is published on the same release train as the
+> template's own package, so the authentication code is vendor-maintained either
+> way. Option 2 was taken directly, without stage 1 on the template, and the
+> reasoning is in [ADR-0002](0002-express-over-the-app-template.md), which is
+> authoritative on the app framework. Everything else here still stands.
+
 > **Note added 2026-09-07.** The options above concern the app, not the theme
 > base: "Dawn-based" was carried into this decision without alternatives being
 > listed, and Shopify's Skeleton theme has since become the `theme init` default.

@@ -15,19 +15,29 @@ be unwound later, and every non-obvious decision recorded in an ADR.
 
 ## Repository state
 
-Implementation has not started. The repository currently holds documentation,
-architecture decisions and CI configuration only — there is no `package.json`,
-`theme/`, `apps/`, `packages/` or `prisma/` yet.
+Updated 2026-09-08.
 
-Paths referenced in the rules below describe the **target structure** and are
-created as work proceeds. A rule pointing at a file that does not exist yet is a
-rule to apply once it does. **If a rule requires reading a file that is missing,
-say so instead of improvising** — a missing file is never a licence to guess.
+Present: `theme/` (Dawn-based, phase 1 closed), `apps/admin-app/` (Express +
+React, phase 2 in progress), `packages/shared/`, `prisma/` with its migrations,
+the pnpm workspace at the root, and `docs/`.
+
+Not present yet: `extensions/` (theme app extension, roadmap v2),
+`services/mock-erp` (roadmap v2), the webhook handlers and the queue (phase 3 —
+the `Session` and `Bundle` tables are the whole schema so far).
+
+Paths referenced in the rules below describe the **target structure** where they
+do not exist yet, and are created as work proceeds. A rule pointing at a file
+that does not exist yet is a rule to apply once it does. **If a rule requires
+reading a file that is missing, say so instead of improvising** — a missing file
+is never a licence to guess.
 
 ## Stack
 
 - Theme: Liquid, Dawn-based, vanilla JS (web components). Do not add libraries.
-- App: TypeScript strict, Node 24, Express, React, Polaris, App Bridge.
+- App: TypeScript strict, Node 24, Express (`@shopify/shopify-app-express`, not
+  Shopify's app template — ADR-0002), React, App Bridge, and **Polaris web
+  components** from Shopify's CDN. Not `@shopify/polaris`: that package is
+  deprecated and unmaintained — ADR-0015.
 - Data: PostgreSQL + Prisma. Queue: a table in the same database
   (`FOR UPDATE SKIP LOCKED`), no Redis. Rationale in ADR-0007.
 - Tests: Vitest + supertest. E2E: Playwright.
@@ -37,8 +47,7 @@ say so instead of improvising** — a missing file is never a licence to guess.
 
 1. **API version.** The Admin API version is a code-level compatibility
    contract, not environment configuration: it lives in
-   `packages/shared/src/api-version.ts` (planned — see Repository state) and
-   nowhere else. Never hardcode it inline, never read it from an env var, and
+   `packages/shared/src/api-version.ts` and nowhere else. Never hardcode it inline, never read it from an env var, and
    never take it from model memory — confirm the current stable version through
    the Shopify Dev MCP. The pinned version is **2026-07**; rationale and upgrade
    trigger in ADR-0009.
