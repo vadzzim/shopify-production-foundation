@@ -4,6 +4,7 @@ import { type JobKind, type WebhookTopic } from '@nordlys/shared';
 
 import { logger as defaultLogger, type Logger } from './logger';
 import { acceptDelivery } from './queue';
+import { storableBody } from './webhook-payload';
 import { verifyWebhook } from './webhook-verify';
 
 /**
@@ -144,11 +145,21 @@ export function createWebhookRouter(deps: WebhookRouterDeps): Router {
               {
                 shop,
                 kind,
+                // Not `body`: the delivery is projected onto the fields the
+                // handler for this topic actually reads, and the rest — the
+                // customer, the addresses, the email on a redaction request —
+                // is dropped before it can reach a `jsonb` column that outlives
+                // the job. See `webhook-payload.ts`.
+                //
                 // The cast is the one place this file asserts something the
-                // compiler cannot see: `body` came out of `JSON.parse` two
-                // statements ago, so it is JSON by construction, but its static
-                // type is `unknown` because a parser cannot promise more.
-                payload: { topic, body } as Prisma.InputJsonValue,
+                // compiler cannot see: the projection returns a plain object of
+                // values taken out of `JSON.parse`, so it is JSON by
+                // construction, but its static type says `unknown` because a
+                // parser cannot promise more.
+                payload: {
+                  topic,
+                  body: storableBody(topic, body),
+                } as Prisma.InputJsonValue,
                 correlationId,
               },
             ]

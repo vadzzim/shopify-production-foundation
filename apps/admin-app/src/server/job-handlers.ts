@@ -18,6 +18,7 @@ import { PRODUCT_ROUTINE_STEP } from './graphql-documents';
 import { pushInventoryOnHand } from './inventory';
 import type { Logger } from './logger';
 import type { QueueJob } from './queue';
+import { BUNDLE_ID_PROPERTY } from './webhook-payload';
 import { fromPrismaRoutineStep } from './bundles';
 
 /**
@@ -138,7 +139,7 @@ const handleOrderReceived: JobHandler = async ({ job, prisma, log }) => {
 
   for (const item of order.line_items ?? []) {
     for (const property of item.properties ?? []) {
-      if (property.name === '_bundle_id' && property.value) {
+      if (property.name === BUNDLE_ID_PROPERTY && property.value) {
         bundleIds.add(property.value);
       }
     }
@@ -310,7 +311,12 @@ const handleShopCleanup: JobHandler = async ({ job, prisma, log }) => {
 
 interface CompliancePayload {
   shop_domain?: string;
-  customer?: { id?: number; email?: string };
+  /**
+   * No `email`. Shopify sends one on both customer topics; the projection in
+   * `webhook-payload.ts` drops it before the job row is written, so the type
+   * says what is actually there rather than what arrived at the endpoint.
+   */
+  customer?: { id?: number };
   orders_requested?: number[];
   data_request?: { id?: number };
 }
@@ -319,20 +325,28 @@ interface CompliancePayload {
  * The three mandatory compliance topics.
  *
  * What this app stores decides what each of them means, so it is worth saying
- * plainly: **there is no customer personal data in this database.** The schema
- * holds OAuth sessions (staff, not customers), bundle definitions, webhook
- * delivery ids and job rows. Nothing keyed to a customer, no addresses, no
- * order contents beyond the ids a webhook mentioned in passing.
+ * plainly: **no table here is keyed to a customer.** The schema holds OAuth
+ * sessions (staff, not customers), bundle definitions, webhook delivery ids and
+ * job rows. No addresses, no contact details, no order contents.
  *
- * That makes `customers/data_request` and `customers/redact` genuine no-ops
- * rather than unimplemented ones — and the difference is only defensible if it
- * stays true, which is why a test asserts the set of tables that may hold
- * customer data is empty. Add such a table and that test fails, here, rather
- * than during an app review.
+ * That is what makes `customers/data_request` an answer of "nothing" rather
+ * than an unimplemented handler — but only for as long as it stays true, and
+ * the queue is where it stops being true by accident. `Job.payload` is the one
+ * column in this schema that holds whatever a webhook happened to carry, which
+ * is why deliveries are projected onto the fields their handler reads before
+ * they are stored (`webhook-payload.ts`). What that leaves of a customer is an
+ * id on the compliance request itself, and the handlers below erase it.
  *
- * `shop/redact` is different: it is the instruction to erase, and it is the one
- * that deletes. It arrives 48 hours after uninstall, which is why the uninstall
- * handler above deliberately leaves the bundles alone.
+ * `shop/redact` is the instruction to erase everything for a shop. It arrives
+ * 48 hours after uninstall, which is why the uninstall handler above
+ * deliberately leaves the bundles alone.
+ *
+ * Both redaction paths spare exactly one row: the job doing the deleting. The
+ * worker still has to mark it SUCCEEDED when this function returns, and a row
+ * deleted under it fails that update — leaving a redaction that did its work
+ * and then reports as failed, which invites someone to retry it. What survives
+ * on that row is the id of the request itself, and the next `shop/redact`
+ * takes it.
  */
 const handleComplianceRequest: JobHandler = async ({ job, prisma, log }) => {
   const { topic, body } = parseWebhookPayload(job);
@@ -348,14 +362,40 @@ const handleComplianceRequest: JobHandler = async ({ job, prisma, log }) => {
   }
 
   if (topic === 'customers/redact') {
-    log.info('Customer redaction request: nothing stored to redact', {
-      customerId: payload.customer?.id,
+    const customerId = payload.customer?.id;
+
+    if (customerId === undefined) {
+      // Shopify always sends the customer. A redaction request that does not
+      // name one cannot be discharged and will not start to on the fifth
+      // attempt, so it goes to the dead-letter state where someone sees it,
+      // rather than being logged as handled.
+      throw new PermanentJobError(
+        'The customers/redact payload named no customer.',
+      );
+    }
+
+    // No table is keyed to a customer, so this is the whole of it: the earlier
+    // compliance requests about the same person, whose payloads carry their id.
+    // The filter is a `jsonb` path comparison rather than a scan in application
+    // code — reading every job row for a shop into this process to test one
+    // field would be the same query with more steps and a worse plan.
+    const jobs = await prisma.job.deleteMany({
+      where: {
+        shop: job.shop,
+        id: { not: job.id },
+        payload: { path: ['body', 'customer', 'id'], equals: customerId },
+      },
+    });
+
+    log.info('Customer redaction request completed', {
+      customerId,
+      jobsDeleted: jobs.count,
     });
     return;
   }
 
   if (topic === 'shop/redact') {
-    // Order matters only for readability; all three are scoped to this shop and
+    // Order matters only for readability; all four are scoped to this shop and
     // BundleItem cascades from Bundle.
     const bundles = await prisma.bundle.deleteMany({ where: { shop: job.shop } });
     const sessions = await prisma.session.deleteMany({
@@ -364,11 +404,20 @@ const handleComplianceRequest: JobHandler = async ({ job, prisma, log }) => {
     const deliveries = await prisma.webhookDelivery.deleteMany({
       where: { shop: job.shop },
     });
+    // The queue too. `Job.payload` is what a webhook sent and `Job.result` is
+    // what a handler produced — the catalog export's summary of the store, for
+    // one — and neither is covered by any of the deletes above: nothing
+    // cascades to this table, because a job outlives the delivery that created
+    // it on purpose.
+    const queued = await prisma.job.deleteMany({
+      where: { shop: job.shop, id: { not: job.id } },
+    });
 
     log.info('Shop redaction request completed', {
       bundlesDeleted: bundles.count,
       sessionsDeleted: sessions.count,
       deliveriesDeleted: deliveries.count,
+      jobsDeleted: queued.count,
     });
     return;
   }
