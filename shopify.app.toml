@@ -34,6 +34,33 @@ redirect_urls = ["https://example.com/api/auth/callback"]
 # ADR-0009). TOML cannot import it, so a test asserts the two agree.
 api_version = "2026-07"
 
+# App-specific subscriptions: declared here, applied to every shop that installs
+# the app, and never touched through the Admin API (ADR-0016). Mixing the two
+# kinds on one topic delivers it twice, and `shopify.auth.callback()` deletes
+# shop-specific subscriptions it does not recognise on every install.
+#
+# `topics` must match WEBHOOK_TOPICS and `uri` must match `webhooks.path` in
+# apps/admin-app/src/server/shopify.ts; tests assert both, because a
+# subscription with no code behind it and a handler with no subscription in
+# front of it are equally invisible until a delivery is missed.
+#
+# Applied to the linked development store by `shopify app dev`; for every other
+# store they take effect on `shopify app deploy`.
+[[webhooks.subscriptions]]
+topics = ["orders/create", "products/update", "app/uninstalled"]
+uri = "/api/webhooks"
+
+# The mandatory privacy topics. A separate block because they are declared under
+# `compliance_topics`, not `topics`, and cannot be subscribed to through the API
+# at all — the config file is the only place they can exist.
+[[webhooks.subscriptions]]
+uri = "/api/webhooks"
+compliance_topics = [
+  "customers/data_request",
+  "customers/redact",
+  "shop/redact",
+]
+
 [build]
 automatically_update_urls_on_dev = true
 include_config_on_deploy = true

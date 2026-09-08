@@ -101,3 +101,90 @@ enum BundleStatus {
   ACTIVE
   ARCHIVED
 }
+
+/// One accepted webhook delivery, keyed by the id Shopify puts on it.
+///
+/// This table exists to answer one question — "have I already accepted this
+/// exact delivery?" — and it answers it with a primary key rather than with a
+/// lookup in application code. Shopify retries a delivery it did not get a
+/// timely 200 for, and it makes no at-most-once promise even when it did, so
+/// duplicates are normal traffic rather than an error case.
+///
+/// Rule 10: the insert is `ON CONFLICT DO NOTHING` and the duplicate is
+/// detected from the row count. A `SELECT` before the `INSERT` would be a race
+/// between two deliveries of the same webhook arriving on two connections at
+/// once — both would see nothing and both would enqueue.
+model WebhookDelivery {
+  /// X-Shopify-Webhook-Id: unique per delivery attempt of one event.
+  id         String   @id
+  /// X-Shopify-Event-Id: shared by every delivery produced by one merchant
+  /// action. Stored but not the key — deduplicating on it would drop a genuine
+  /// second delivery to a different topic from the same action.
+  eventId    String?
+  shop       String
+  topic      String
+  /// The version the payload was serialised with, which is the subscription's
+  /// version and not necessarily the one this code calls (ADR-0009). Recorded
+  /// so a payload that stops parsing can be traced to a version drift.
+  apiVersion String
+  receivedAt DateTime @default(now())
+
+  @@index([shop, receivedAt])
+}
+
+/// The queue (ADR-0007, decision 3).
+///
+/// A table rather than Redis: the webhook row above and the job below are
+/// written in one transaction, so "accepted and enqueued" cannot come apart.
+/// With a broker that is a distributed-commit problem for a queue that carries
+/// a handful of jobs per minute.
+model Job {
+  id            String    @id @default(cuid())
+  shop          String
+  kind          String
+  /// The webhook payload, or whatever the enqueuer needs. `jsonb`, so a job can
+  /// be inspected in the sync log without a second table per kind.
+  payload       Json
+  status        JobStatus @default(PENDING)
+  attempts      Int       @default(0)
+  /// After this many failed attempts the job stops being retried and becomes
+  /// DEAD — the dead-letter state. Per-row rather than global so one topic can
+  /// be given a different budget without a migration.
+  maxAttempts   Int       @default(5)
+  /// The earliest time a worker may claim this job. Exponential backoff is
+  /// expressed by pushing this into the future, which keeps the retry schedule
+  /// in the same query that finds work rather than in a timer somewhere.
+  runAt         DateTime  @default(now())
+  /// Set while a worker holds the job. A worker that dies leaves the row RUNNING
+  /// with a stale lockedAt; the reaper uses this to release it.
+  lockedAt      DateTime?
+  lockedBy      String?
+  lastError     String?
+  /// Carried from the webhook request through every log line this job produces
+  /// and into the Admin API calls it makes, so one delivery can be followed end
+  /// to end in the logs.
+  correlationId String
+  /// Which delivery produced this job, when one did. Null for jobs enqueued from
+  /// the UI.
+  webhookId     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  finishedAt    DateTime?
+
+  /// The claim query orders by runAt over PENDING rows; without this index that
+  /// is a sequential scan taken under a row lock on every poll.
+  @@index([status, runAt])
+  /// The sync log: one shop's jobs, newest first.
+  @@index([shop, createdAt])
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  /// Failed, attempts left, waiting for runAt.
+  FAILED
+  /// Out of attempts. The dead-letter state: nothing retries it automatically,
+  /// and it is what the sync log surfaces for manual retry.
+  DEAD
+}
