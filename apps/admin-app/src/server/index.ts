@@ -13,6 +13,7 @@ import { createApp } from './app';
 import { prisma } from './db';
 import { logger, setLogLevel } from './logger';
 import { offlineGraphqlFor } from './shopify';
+import { createShutdown } from './shutdown';
 import { createWorker } from './worker';
 
 setLogLevel(env.LOG_LEVEL);
@@ -34,7 +35,20 @@ const worker = createWorker({
   log: logger,
 });
 
-void worker.start();
+/**
+ * Kept, not discarded: this promise resolves when the loop has actually
+ * stopped, and the shutdown below waits on it. A `void worker.start()` here
+ * would make `worker.stop()` a flag nobody looks at the effect of.
+ *
+ * The `catch` is what keeps the loop's own failure from becoming an unhandled
+ * rejection that takes the process down without a line saying why. `tick()`
+ * already survives a failing tick; this covers the loop around it.
+ */
+const workerLoop = worker.start().catch((error: unknown) => {
+  logger.fatal('Queue worker loop stopped unexpectedly', {
+    error: error instanceof Error ? error.message : String(error),
+  });
+});
 
 const server = app.listen(env.PORT, () => {
   logger.info('admin-app listening', {
@@ -48,24 +62,25 @@ const server = app.listen(env.PORT, () => {
  *
  * A worker killed while holding a job leaves the row RUNNING with nobody
  * running it. The reaper in `queue.ts` recovers those, but only after the lock
- * has gone stale — minutes during which the work simply does not happen. Asking
- * the loop to stop and letting the current tick finish costs a second at
- * shutdown and avoids that entirely.
+ * has gone stale — minutes during which the work simply does not happen. So the
+ * loop is asked to stop and then *waited for*, along with the HTTP server,
+ * before the database connection they share is closed. The sequence and its
+ * grace period are in `shutdown.ts`, where they can be tested.
  *
  * `tsx watch` sends SIGTERM on every save, so this path runs constantly in
  * development, which is the best way to be sure it works.
  */
-function shutdown(signal: string): void {
-  logger.info('Shutting down', { signal });
-  worker.stop();
-  server.close(() => {
-    void prisma.$disconnect().then(() => process.exit(0));
-  });
-}
+const shutdown = createShutdown({
+  worker,
+  workerLoop,
+  server,
+  disconnect: () => prisma.$disconnect(),
+  log: logger,
+});
 
 process.on('SIGTERM', () => {
-  shutdown('SIGTERM');
+  void shutdown('SIGTERM');
 });
 process.on('SIGINT', () => {
-  shutdown('SIGINT');
+  void shutdown('SIGINT');
 });
