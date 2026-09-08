@@ -575,6 +575,29 @@ describe('updateBundle', () => {
     }
   });
 
+  it('refuses to activate a set that is missing a step entirely', async () => {
+    // The request schema requires all three, but the stored items may not have
+    // them — an older row, or one edited by hand. Activating that would put a
+    // two-step routine on the storefront.
+    const { prisma } = editablePrisma([
+      storedBundle({
+        items: [storedItem('1', 'CLEANSE', 0), storedItem('2', 'TREAT', 1)],
+      }),
+    ]);
+    const { graphql } = fakeProductLookup(CATALOG);
+
+    try {
+      await updateBundle(prisma, graphql, SHOP, 'bundle_1', {
+        status: 'active',
+      });
+      expect.unreachable('updateBundle should have thrown');
+    } catch (error) {
+      expect((error as BundleValidationError).detail[0]).toContain(
+        'no product for this step',
+      );
+    }
+  });
+
   it('does not find a bundle belonging to another shop', async () => {
     const { prisma } = editablePrisma([
       storedBundle({ shop: 'someone-else.myshopify.com' }),

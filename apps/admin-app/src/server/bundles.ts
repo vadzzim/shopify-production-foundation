@@ -369,6 +369,16 @@ function assertActivatable(
 ): void {
   const problems: string[] = [];
 
+  // Checked even though the request schema requires all three: `items` may be
+  // the ones already stored, and a set that lost a slot some other way — a
+  // half-applied migration, a row edited by hand — must not become the version
+  // the storefront renders.
+  for (const step of ROUTINE_STEPS) {
+    if (!items.some((item) => item.routineStep === step)) {
+      problems.push(`${step}: this routine set has no product for this step.`);
+    }
+  }
+
   for (const item of items) {
     const product = products.get(item.productGid);
 
