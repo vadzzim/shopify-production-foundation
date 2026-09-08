@@ -5,7 +5,11 @@
 - Node 24 (Active LTS). The version is pinned in `.nvmrc`.
 - pnpm
 - Docker (or a locally installed PostgreSQL)
-- Shopify CLI: `npm i -g @shopify/cli@latest`
+- Shopify CLI `4.7.1`: `npm i -g @shopify/cli@4.7.1`. The exact version, not
+  `@latest`: CI checks the theme with this same version
+  (`SHOPIFY_CLI_VERSION` in `.github/workflows/ci.yml`), and a local CLI that
+  pushes a theme a different CLI then checks is how a green pipeline and a
+  broken preview coexist. Upgrading means bumping both lines together.
 - A Shopify Partner account and a development store
 
 ## Shell
