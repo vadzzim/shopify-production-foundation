@@ -64,19 +64,27 @@ Bundle management and sync observability.
 - [x] Metafield and metaobject definitions created on app install
       (`metafieldDefinitionCreate`) — the app prepares the store itself.
       Idempotent: `TAKEN` is a success, anything else is not
-- [~] Polaris UI: bundle list, empty state, explicit error messages and the sync
-      log are done; editing is not. The criterion said "skeletons": Polaris
+- [x] Polaris UI: bundle list, empty state, explicit error messages, the sync
+      log, and editing — title, status and one product per step, in a modal,
+      with delete behind a confirmation. The criterion said "skeletons": Polaris
       1.0 ships no skeleton component, so the table's own `loading` state is
       what the screen uses — see
       [ADR-0015](adr/0015-polaris-web-components-over-polaris-react.md)
-- [~] Admin GraphQL: `extensions.cost.throttleStatus` read with backoff and
-      jitter, and `userErrors` handled in every mutation. Catalog export with
-      `bulkOperationRunQuery` is not written yet (ADR-0004)
+- [x] Admin GraphQL: `extensions.cost.throttleStatus` read with backoff and
+      jitter, and `userErrors` handled in every mutation. The whole-catalog read
+      is a bulk operation polled from the queue, not a paginated loop — see
+      [ADR-0004](adr/0004-bulk-operations-over-pagination.md). The editor's
+      product picker keeps the bounded scan and says so when it did not reach
+      the end of the catalog
 
 **Completion criterion:** the app installs on a clean store and works with no
 manual data preparation. **Not yet verified** — `shopify app init` and
 `shopify app dev` are interactive, so the install has not been run end to end
 against `ecorn-oj1cb5ll`. Everything below the install is exercised by tests.
+
+Every feature of this phase is now written; what is missing is the one thing
+tests cannot supply. The two are kept apart deliberately: the boxes above are
+about code that exists and is exercised, the criterion is about a store.
 
 ---
 
@@ -131,8 +139,9 @@ locally.
 ## Phase 4 — Quality and reproducibility
 
 - [~] Tests: HMAC (valid, invalid and missing signature, tampered body),
-      idempotency, backoff on an exhausted bucket and `userErrors` handling are
-      done. Variant-to-external-SKU mapping is not — it needs the mock ERP
+      idempotency, backoff on an exhausted bucket, `userErrors` handling and the
+      bulk-export state machine are done. Variant-to-external-SKU mapping is not
+      — it needs the mock ERP
 - [x] CI: typecheck, lint, tests, `shopify theme check`, secret scan, Lighthouse
       budgets (non-blocking, report as an artifact). The app job now runs a
       `postgres:16-alpine` service, so the idempotency and `SKIP LOCKED` suites
