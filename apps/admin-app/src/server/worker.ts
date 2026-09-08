@@ -87,6 +87,25 @@ const defaultSleep = (ms: number): Promise<void> =>
  */
 const REAP_EVERY_TICKS = 20;
 
+/**
+ * This worker finished a job it no longer owned.
+ *
+ * Its lock went stale — the run outlasted the staleness window, or the process
+ * was paused long enough for it to look that way — the reaper released the row,
+ * and another worker took it. The outcome is dropped rather than written, which
+ * is what stops a late write marking someone else's in-flight attempt finished.
+ *
+ * Worth a warning even though nothing is broken: the work was done twice, and
+ * two of these in a row means the staleness window is shorter than a job of
+ * this kind actually takes.
+ */
+function claimLost(log: Logger, startedAt: number, what: string): void {
+  log.warn('Claim expired while the job was running; outcome dropped', {
+    durationMs: Date.now() - startedAt,
+    outcome: what,
+  });
+}
+
 export function createWorker(options: WorkerOptions): Worker {
   const {
     prisma,
@@ -124,11 +143,9 @@ export function createWorker(options: WorkerOptions): Worker {
     if (!handler) {
       // A kind written by a newer deploy, or by hand. Retrying cannot conjure
       // the code, so it goes straight to the dead-letter state.
-      await failJob(
-        prisma,
-        { ...job, attempts: job.maxAttempts },
-        `No handler registered for job kind "${job.kind}".`,
-      );
+      await failJob(prisma, job, `No handler registered for job kind "${job.kind}".`, {
+        permanent: true,
+      });
       jobLog.error('Job has no handler; moved to the dead-letter state');
       return;
     }
@@ -137,7 +154,13 @@ export function createWorker(options: WorkerOptions): Worker {
 
     try {
       await handler({ job, prisma, graphqlFor, log: jobLog });
-      await completeJob(prisma, job.id);
+      const outcome = await completeJob(prisma, job);
+
+      if (outcome === 'claim_lost') {
+        claimLost(jobLog, startedAt, 'succeeded');
+        return;
+      }
+
       jobLog.info('Job succeeded', { durationMs: Date.now() - startedAt });
     } catch (error) {
       if (error instanceof RetryLaterError) {
@@ -145,7 +168,13 @@ export function createWorker(options: WorkerOptions): Worker {
         // back to PENDING with its attempt returned, so a slow bulk operation
         // cannot exhaust an attempt budget meant for failures — and the sync
         // log does not show a red row for work that is going fine.
-        await rescheduleJob(prisma, job.id, error.runAt);
+        const outcome = await rescheduleJob(prisma, job, error.runAt);
+
+        if (outcome === 'claim_lost') {
+          claimLost(jobLog, startedAt, 'asked to be rescheduled');
+          return;
+        }
+
         jobLog.info('Job is waiting; rescheduled', {
           durationMs: Date.now() - startedAt,
           runAt: error.runAt.toISOString(),
@@ -156,16 +185,17 @@ export function createWorker(options: WorkerOptions): Worker {
 
       const message = error instanceof Error ? error.message : String(error);
 
-      // A permanent failure skips the remaining attempts by presenting the job
-      // as already out of budget. Retrying a malformed payload four more times
-      // only delays the sync log showing anyone that it is broken.
-      const outcome = await failJob(
-        prisma,
-        error instanceof PermanentJobError
-          ? { ...job, attempts: job.maxAttempts }
-          : job,
-        message,
-      );
+      // A permanent failure skips the remaining attempts: retrying a malformed
+      // payload four more times only delays the sync log showing anyone that it
+      // is broken.
+      const outcome = await failJob(prisma, job, message, {
+        permanent: error instanceof PermanentJobError,
+      });
+
+      if (outcome === 'claim_lost') {
+        claimLost(jobLog, startedAt, 'failed');
+        return;
+      }
 
       jobLog[outcome === 'dead' ? 'error' : 'warn'](
         outcome === 'dead'

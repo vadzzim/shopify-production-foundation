@@ -121,6 +121,7 @@ describe.skipIf(!hasDatabase)('the redaction handlers', () => {
         maxAttempts: 5,
         correlationId: 'delivery-redact',
         webhookId: 'delivery-redact',
+        lockedBy: 'worker-test',
       }),
     );
 
@@ -164,6 +165,7 @@ describe.skipIf(!hasDatabase)('the redaction handlers', () => {
         maxAttempts: 5,
         correlationId: 'delivery-shop-redact',
         webhookId: 'delivery-shop-redact',
+        lockedBy: 'worker-test',
       }),
     );
 
