@@ -17,11 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` here. The action refuses to run when a version is given
+      # both in its config and in package.json's `packageManager`, and
+      # `packageManager` is the better source: it pins the exact version rather
+      # than a major, and Corepack reads the same field locally.
       - uses: pnpm/action-setup@v4
-        with:
-          # Must match the major version of the lockfile format. Local pnpm is
-          # 10.x; on 9 a v10 lockfile fails --frozen-lockfile.
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
