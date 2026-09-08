@@ -1,6 +1,7 @@
 import type { StoreSetupReport } from '@nordlys/shared';
 
 import type { AdminGraphql } from './admin-graphql';
+import type { Logger } from './logger';
 import { ensureStoreDefinitions } from './store-setup';
 
 /**
@@ -26,10 +27,7 @@ export interface StorePreparationDeps<Session> {
   /** The shop's offline session, or `undefined` if none is stored. */
   loadOfflineSession: (shop: string) => Promise<Session | undefined>;
   graphqlFor: (session: Session) => AdminGraphql;
-  log: {
-    info: (message: string, detail?: unknown) => void;
-    error: (message: string, detail?: unknown) => void;
-  };
+  log: Pick<Logger, 'info' | 'error'>;
   /** Overridden only in tests. */
   ensureDefinitions?: (graphql: AdminGraphql) => Promise<StoreSetupReport>;
 }
@@ -69,13 +67,13 @@ export async function prepareStoreAfterAuth<Session>(
 
   try {
     const report = await ensure(deps.graphqlFor(offlineSession));
-    deps.log.info(`Store prepared for ${shop}`, report.results);
+    deps.log.info(`Store prepared for ${shop}`, { results: report.results });
     return report;
   } catch (error) {
     deps.log.error(
       `Store preparation failed for ${shop}; the app is installed but the ` +
         `theme's metafields may be missing. Retry with "Prepare store".`,
-      error,
+      { error: error instanceof Error ? error.message : String(error) },
     );
     return undefined;
   }

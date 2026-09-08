@@ -83,7 +83,9 @@ export const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => 
   }
 
   if (error instanceof UserErrorsError) {
-    logger.error(`${error.operation} returned userErrors`, error.userErrors);
+    logger.error(`${error.operation} returned userErrors`, {
+      userErrors: error.userErrors,
+    });
     sendError(
       res,
       'shopify_api',
@@ -94,7 +96,9 @@ export const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => 
   }
 
   if (error instanceof AdminApiError) {
-    logger.error(`Admin API call failed: ${error.operation}`, error.detail);
+    logger.error(`Admin API call failed: ${error.operation}`, {
+      detail: error.detail,
+    });
     sendError(
       res,
       'shopify_api',
@@ -104,7 +108,10 @@ export const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => 
     return;
   }
 
-  logger.error('Unhandled error in an API route', error);
+  logger.error('Unhandled error in an API route', {
+    error: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
   sendError(res, 'internal', 'Something went wrong on our side.');
 };
 
