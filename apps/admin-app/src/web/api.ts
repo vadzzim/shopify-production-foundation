@@ -2,10 +2,13 @@ import {
   apiErrorSchema,
   bundleListResponseSchema,
   bundleSchema,
+  catalogCandidatesSchema,
   jobListResponseSchema,
   jobSummarySchema,
   storeSetupReportSchema,
   type Bundle,
+  type BundleUpdate,
+  type CatalogCandidates,
   type JobSummary,
   type StoreSetupReport,
 } from '@nordlys/shared';
@@ -103,6 +106,63 @@ export async function createStarterBundle(): Promise<Bundle> {
     { method: 'POST' },
   );
   return bundle;
+}
+
+export async function updateBundle(
+  id: string,
+  update: BundleUpdate,
+): Promise<Bundle> {
+  const { bundle } = await request(
+    `/api/bundles/${encodeURIComponent(id)}`,
+    z.object({ bundle: bundleSchema }),
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    },
+  );
+  return bundle;
+}
+
+/**
+ * Delete a routine set.
+ *
+ * Its own function rather than a flag on {@link request}, because the server
+ * answers 204 with no body at all: `response.json()` on an empty body throws,
+ * and a schema that has to accept `null` to describe "nothing" would weaken
+ * every other response this file parses.
+ */
+export async function deleteBundle(id: string): Promise<void> {
+  let response: Response;
+
+  try {
+    response = await fetch(`/api/bundles/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  } catch (cause) {
+    throw new ApiRequestError(
+      'Could not reach the app server. Check that it is still running.',
+      0,
+      [cause instanceof Error ? cause.message : String(cause)],
+    );
+  }
+
+  if (response.ok) return;
+
+  const payload: unknown = await response.json().catch(() => null);
+  const parsed = apiErrorSchema.safeParse(payload);
+
+  throw new ApiRequestError(
+    parsed.success
+      ? parsed.data.error.message
+      : `The app server answered ${String(response.status)} without an error body.`,
+    response.status,
+    parsed.success ? (parsed.data.error.detail ?? []) : [],
+  );
+}
+
+export async function fetchCandidates(): Promise<CatalogCandidates> {
+  return request('/api/catalog/candidates', catalogCandidatesSchema);
 }
 
 export async function prepareStore(): Promise<StoreSetupReport> {
